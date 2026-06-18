@@ -1,6 +1,13 @@
 // 学习通自动刷课插件 - 内容脚本
 // 功能：自动播放视频、倍速播放、自动答题、下一章自动切换
 
+// 绕过自动化检测
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+window.navigator.chrome = { runtime: {} };
+
+// 随机延迟函数
+const randomDelay = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
 class XueXiTongAutoPlayer {
   constructor() {
     this.isRunning = false;
@@ -127,15 +134,18 @@ class XueXiTongAutoPlayer {
   setupVideo(video) {
     if (!video) return;
 
-    // 设置播放速度
-    video.playbackRate = this.playbackSpeed;
+    // 随机延迟后再操作，模拟人类行为
+    setTimeout(() => {
+      // 设置播放速度
+      video.playbackRate = this.playbackSpeed;
 
-    // 如果视频未播放，自动播放
-    if (video.paused && this.isRunning) {
-      video.play().catch(err => {
-        console.log('自动播放被阻止:', err);
-      });
-    }
+      // 如果视频未播放，自动播放
+      if (video.paused && this.isRunning) {
+        video.play().catch(err => {
+          console.log('自动播放被阻止:', err);
+        });
+      }
+    }, randomDelay(500, 1500));
 
     // 监听视频播放事件
     video.addEventListener('play', () => {
@@ -241,22 +251,25 @@ class XueXiTongAutoPlayer {
       const radios = document.querySelectorAll('input[type="radio"]');
       const checkboxes = document.querySelectorAll('input[type="checkbox"]');
 
-      if (radios.length > 0) {
-        const randomIndex = Math.floor(Math.random() * radios.length);
-        radios[randomIndex].click();
-        console.log('自动答题（随机）：已选择单选答案');
-      } else if (checkboxes.length > 0) {
-        const indices = [];
-        const numToSelect = Math.ceil(checkboxes.length / 2);
-        while (indices.length < numToSelect) {
-          const idx = Math.floor(Math.random() * checkboxes.length);
-          if (!indices.includes(idx)) {
-            indices.push(idx);
+      // 随机延迟后再答题
+      setTimeout(() => {
+        if (radios.length > 0) {
+          const randomIndex = Math.floor(Math.random() * radios.length);
+          radios[randomIndex].click();
+          console.log('自动答题（随机）：已选择单选答案');
+        } else if (checkboxes.length > 0) {
+          const indices = [];
+          const numToSelect = Math.ceil(checkboxes.length / 2);
+          while (indices.length < numToSelect) {
+            const idx = Math.floor(Math.random() * checkboxes.length);
+            if (!indices.includes(idx)) {
+              indices.push(idx);
+            }
           }
+          indices.forEach(idx => checkboxes[idx].click());
+          console.log('自动答题（随机）：已选择多选答案');
         }
-        indices.forEach(idx => checkboxes[idx].click());
-        console.log('自动答题（随机）：已选择多选答案');
-      }
+      }, randomDelay(300, 800));
       return true;
     } catch (error) {
       console.log('随机答题失败:', error);
@@ -283,25 +296,25 @@ class XueXiTongAutoPlayer {
         const radios = document.querySelectorAll('input[type="radio"]');
         const checkboxes = document.querySelectorAll('input[type="checkbox"]');
 
-        if (matchedQuestion.type === 'single' || radios.length > 0) {
-          // 单选题：answer 应该是字母如 'A', 'B', 'C', 'D'
-          const index = answer.charCodeAt(0) - 65; // A=0, B=1, C=2, D=3
-          if (index >= 0 && index < radios.length) {
-            radios[index].click();
-            console.log('自动答题（题库）：已选择单选答案', answer);
-            return true;
-          }
-        } else if (matchedQuestion.type === 'multiple' || checkboxes.length > 0) {
-          // 多选题：answer 应该是字母组合如 'AB', 'ACD'
-          for (let i = 0; i < answer.length; i++) {
-            const index = answer.charCodeAt(i) - 65;
-            if (index >= 0 && index < checkboxes.length) {
-              checkboxes[index].click();
+        // 延迟后再答题
+        setTimeout(() => {
+          if (matchedQuestion.type === 'single' || radios.length > 0) {
+            const index = answer.charCodeAt(0) - 65;
+            if (index >= 0 && index < radios.length) {
+              radios[index].click();
+              console.log('自动答题（题库）：已选择单选答案', answer);
             }
+          } else if (matchedQuestion.type === 'multiple' || checkboxes.length > 0) {
+            for (let i = 0; i < answer.length; i++) {
+              const index = answer.charCodeAt(i) - 65;
+              if (index >= 0 && index < checkboxes.length) {
+                checkboxes[index].click();
+              }
+            }
+            console.log('自动答题（题库）：已选择多选答案', answer);
           }
-          console.log('自动答题（题库）：已选择多选答案', answer);
-          return true;
-        }
+        }, randomDelay(300, 800));
+        return true;
       }
 
       console.log('题库未找到匹配答案， fallback 到随机答题');
@@ -360,8 +373,11 @@ class XueXiTongAutoPlayer {
       const answer = data.choices?.[0]?.message?.content?.trim()?.toUpperCase() || '';
 
       if (answer) {
-        this.selectAnswer(answer);
-        console.log('自动答题（AI）：已选择答案', answer);
+        // 延迟后再选择答案
+        setTimeout(() => {
+          this.selectAnswer(answer);
+          console.log('自动答题（AI）：已选择答案', answer);
+        }, randomDelay(300, 800));
         return true;
       }
 
@@ -435,11 +451,11 @@ class XueXiTongAutoPlayer {
         success = this.answerRandomly();
     }
 
-    // 提交答案
+    // 提交答案延迟
     if (success) {
       setTimeout(() => {
         this.submitAnswer();
-      }, 500);
+      }, randomDelay(800, 1500));
     }
   }
 
