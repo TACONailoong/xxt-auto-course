@@ -6,8 +6,12 @@ class XueXiTongAutoPlayer {
     this.isRunning = false;
     this.playbackSpeed = 1.5; // 默认倍速
     this.autoAnswer = true; // 自动答题
+    this.answerMode = 'random'; // 答题模式：random | bank | ai
+    this.apiUrl = ''; // AI API 地址
+    this.apiKey = ''; // AI API 密钥
     this.currentVideo = null;
     this.observer = null;
+    this.quizBank = null; // 本地题库
     this.init();
   }
 
@@ -16,13 +20,16 @@ class XueXiTongAutoPlayer {
     await this.waitForPageReady();
     // 加载用户设置
     await this.loadSettings();
+    // 加载题库
+    await this.loadQuizBank();
     // 开始监听视频
     this.startVideoObserver();
     // 初始化完成
     console.log('学习通自动刷课插件已启动', {
       isRunning: this.isRunning,
       playbackSpeed: this.playbackSpeed,
-      autoAnswer: this.autoAnswer
+      autoAnswer: this.autoAnswer,
+      answerMode: this.answerMode
     });
   }
 
@@ -42,12 +49,36 @@ class XueXiTongAutoPlayer {
   // 从存储加载设置
   async loadSettings() {
     try {
-      const result = await chrome.storage.sync.get(['isRunning', 'playbackSpeed', 'autoAnswer']);
+      const result = await chrome.storage.sync.get([
+        'isRunning',
+        'playbackSpeed',
+        'autoAnswer',
+        'answerMode',
+        'apiUrl',
+        'apiKey'
+      ]);
       this.isRunning = result.isRunning ?? true;
       this.playbackSpeed = result.playbackSpeed ?? 1.5;
       this.autoAnswer = result.autoAnswer ?? true;
+      this.answerMode = result.answerMode ?? 'random';
+      this.apiUrl = result.apiUrl ?? '';
+      this.apiKey = result.apiKey ?? '';
     } catch (error) {
       console.error('加载设置失败:', error);
+    }
+  }
+
+  // 加载本地题库
+  async loadQuizBank() {
+    try {
+      const response = await fetch(chrome.runtime.getURL('quiz-bank.json'));
+      if (response.ok) {
+        this.quizBank = await response.json();
+        console.log('题库加载成功，题目数量:', this.quizBank?.questions?.length || 0);
+      }
+    } catch (error) {
+      console.log('题库加载失败:', error);
+      this.quizBank = null;
     }
   }
 
@@ -183,21 +214,38 @@ class XueXiTongAutoPlayer {
     }
   }
 
-  // 自动答题逻辑
-  autoAnswerQuestion() {
-    // 尝试点击第一个选项（常见策略）
+  // 获取题目文本
+  getQuestionText() {
+    // 尝试多种选择器获取题目文本
+    const questionSelectors = [
+      '.quiz_question',
+      '.question-title',
+      '.question_text',
+      '.ans-question-text',
+      'h3',
+      '.title'
+    ];
+
+    for (const selector of questionSelectors) {
+      const element = document.querySelector(selector);
+      if (element && element.textContent.trim()) {
+        return element.textContent.trim();
+      }
+    }
+    return '';
+  }
+
+  // 模式1：随机答题
+  answerRandomly() {
     try {
-      // 查找所有单选按钮和复选框
       const radios = document.querySelectorAll('input[type="radio"]');
       const checkboxes = document.querySelectorAll('input[type="checkbox"]');
 
       if (radios.length > 0) {
-        // 随机选择答案（模拟）
         const randomIndex = Math.floor(Math.random() * radios.length);
         radios[randomIndex].click();
-        console.log('自动答题：已选择单选答案');
+        console.log('自动答题（随机）：已选择单选答案');
       } else if (checkboxes.length > 0) {
-        // 多选题：尝试选择多个选项
         const indices = [];
         const numToSelect = Math.ceil(checkboxes.length / 2);
         while (indices.length < numToSelect) {
@@ -207,20 +255,204 @@ class XueXiTongAutoPlayer {
           }
         }
         indices.forEach(idx => checkboxes[idx].click());
-        console.log('自动答题：已选择多选答案');
+        console.log('自动答题（随机）：已选择多选答案');
       }
+      return true;
+    } catch (error) {
+      console.log('随机答题失败:', error);
+      return false;
+    }
+  }
 
-      // 尝试点击确认按钮
-      const confirmButtons = document.querySelectorAll('button');
-      for (const btn of confirmButtons) {
-        const text = btn.textContent?.trim();
-        if (text === '确定' || text === '提交' || text === '下一题') {
-          setTimeout(() => btn.click(), 500);
-          break;
+  // 模式2：题库答题
+  answerFromBank(questionText) {
+    if (!this.quizBank || !this.quizBank.questions) {
+      console.log('题库为空或未加载， fallback 到随机答题');
+      return this.answerRandomly();
+    }
+
+    try {
+      // 关键词匹配
+      const matchedQuestion = this.quizBank.questions.find(q => {
+        if (!q.keywords || !Array.isArray(q.keywords)) return false;
+        return q.keywords.some(keyword => questionText.includes(keyword));
+      });
+
+      if (matchedQuestion && matchedQuestion.answer) {
+        const answer = matchedQuestion.answer.toUpperCase();
+        const radios = document.querySelectorAll('input[type="radio"]');
+        const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+
+        if (matchedQuestion.type === 'single' || radios.length > 0) {
+          // 单选题：answer 应该是字母如 'A', 'B', 'C', 'D'
+          const index = answer.charCodeAt(0) - 65; // A=0, B=1, C=2, D=3
+          if (index >= 0 && index < radios.length) {
+            radios[index].click();
+            console.log('自动答题（题库）：已选择单选答案', answer);
+            return true;
+          }
+        } else if (matchedQuestion.type === 'multiple' || checkboxes.length > 0) {
+          // 多选题：answer 应该是字母组合如 'AB', 'ACD'
+          for (let i = 0; i < answer.length; i++) {
+            const index = answer.charCodeAt(i) - 65;
+            if (index >= 0 && index < checkboxes.length) {
+              checkboxes[index].click();
+            }
+          }
+          console.log('自动答题（题库）：已选择多选答案', answer);
+          return true;
         }
       }
+
+      console.log('题库未找到匹配答案， fallback 到随机答题');
+      return this.answerRandomly();
     } catch (error) {
-      console.log('自动答题失败:', error);
+      console.log('题库答题失败:', error);
+      return this.answerRandomly();
+    }
+  }
+
+  // 模式3：AI答题
+  async answerWithAI(questionText) {
+    if (!this.apiUrl || !this.apiKey) {
+      console.log('AI API 未配置， fallback 到随机答题');
+      return this.answerRandomly();
+    }
+
+    try {
+      // 获取选项文本
+      const options = this.getOptionsText();
+
+      // 构建提示词
+      const prompt = `请根据以下题目和选项，选择正确答案。
+
+题目：${questionText}
+
+选项：${options}
+
+请直接回答正确答案的选项字母（如 A、B、C、D），如果是多选题请给出所有正确选项（如 AB、ACD）。只回答选项，不要其他解释。`;
+
+      // 调用 AI API
+      const response = await fetch(this.apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-3.5-turbo',
+          messages: [
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 50
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('AI API 请求失败');
+      }
+
+      const data = await response.json();
+      const answer = data.choices?.[0]?.message?.content?.trim()?.toUpperCase() || '';
+
+      if (answer) {
+        this.selectAnswer(answer);
+        console.log('自动答题（AI）：已选择答案', answer);
+        return true;
+      }
+
+      console.log('AI 未返回有效答案， fallback 到随机答题');
+      return this.answerRandomly();
+    } catch (error) {
+      console.log('AI 答题失败:', error);
+      return this.answerRandomly();
+    }
+  }
+
+  // 获取选项文本
+  getOptionsText() {
+    const options = [];
+    const optionLabels = ['A', 'B', 'C', 'D', 'E', 'F'];
+
+    // 尝试查找所有选项容器
+    const optionContainers = document.querySelectorAll('li, .option-item, .quiz_option');
+
+    optionContainers.forEach((container, index) => {
+      const text = container.textContent.trim();
+      if (text && text.length < 500) { // 过滤掉太长的文本
+        options.push(`${optionLabels[index]}. ${text}`);
+      }
+    });
+
+    return options.join('\n') || '无法获取选项';
+  }
+
+  // 选择答案
+  selectAnswer(answer) {
+    const answerUpper = answer.toUpperCase();
+    const radios = document.querySelectorAll('input[type="radio"]');
+    const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+
+    if (answerUpper.length === 1 && radios.length > 0) {
+      // 单选题
+      const index = answerUpper.charCodeAt(0) - 65;
+      if (index >= 0 && index < radios.length) {
+        radios[index].click();
+      }
+    } else {
+      // 多选题
+      for (let i = 0; i < answerUpper.length; i++) {
+        const index = answerUpper.charCodeAt(i) - 65;
+        if (index >= 0 && index < checkboxes.length) {
+          checkboxes[index].click();
+        }
+      }
+    }
+  }
+
+  // 自动答题主函数
+  async autoAnswerQuestion() {
+    const questionText = this.getQuestionText();
+    console.log('检测到题目:', questionText);
+
+    let success = false;
+
+    switch (this.answerMode) {
+      case 'random':
+        success = this.answerRandomly();
+        break;
+      case 'bank':
+        success = this.answerFromBank(questionText);
+        break;
+      case 'ai':
+        success = await this.answerWithAI(questionText);
+        break;
+      default:
+        success = this.answerRandomly();
+    }
+
+    // 提交答案
+    if (success) {
+      setTimeout(() => {
+        this.submitAnswer();
+      }, 500);
+    }
+  }
+
+  // 提交答案
+  submitAnswer() {
+    const confirmButtons = document.querySelectorAll('button');
+    for (const btn of confirmButtons) {
+      const text = btn.textContent?.trim();
+      if (text === '确定' || text === '提交' || text === '下一题') {
+        btn.click();
+        console.log('已提交答案');
+        break;
+      }
     }
   }
 
@@ -273,11 +505,27 @@ class XueXiTongAutoPlayer {
     if (settings.autoAnswer !== undefined) {
       this.autoAnswer = settings.autoAnswer;
     }
+    if (settings.answerMode !== undefined) {
+      this.answerMode = settings.answerMode;
+    }
+    if (settings.apiUrl !== undefined) {
+      this.apiUrl = settings.apiUrl;
+    }
+    if (settings.apiKey !== undefined) {
+      this.apiKey = settings.apiKey;
+    }
 
     // 应用新的倍速设置
     if (this.currentVideo) {
       this.currentVideo.playbackRate = this.playbackSpeed;
     }
+
+    console.log('设置已更新', {
+      isRunning: this.isRunning,
+      playbackSpeed: this.playbackSpeed,
+      autoAnswer: this.autoAnswer,
+      answerMode: this.answerMode
+    });
   }
 }
 
@@ -304,7 +552,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({
       isRunning: autoPlayer?.isRunning ?? false,
       playbackSpeed: autoPlayer?.playbackSpeed ?? 1.5,
-      autoAnswer: autoPlayer?.autoAnswer ?? true
+      autoAnswer: autoPlayer?.autoAnswer ?? true,
+      answerMode: autoPlayer?.answerMode ?? 'random',
+      apiUrl: autoPlayer?.apiUrl ?? '',
+      apiKey: autoPlayer?.apiKey ?? ''
     });
   }
   return true;

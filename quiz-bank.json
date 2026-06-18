@@ -1,0 +1,31 @@
+{
+  "version": "1.0.0",
+  "description": "学习通自动答题题库",
+  "questions": [
+    {
+      "keywords": ["网络安全", "防火墙"],
+      "answer": "A",
+      "type": "single"
+    },
+    {
+      "keywords": ["人工智能", "机器学习"],
+      "answer": "B",
+      "type": "single"
+    },
+    {
+      "keywords": ["数据库", "关系型"],
+      "answer": "C",
+      "type": "single"
+    },
+    {
+      "keywords": ["计算机网络", "TCP"],
+      "answer": "A",
+      "type": "single"
+    },
+    {
+      "keywords": ["操作系统", "进程"],
+      "answer": "B",
+      "type": "single"
+    }
+  ]
+}

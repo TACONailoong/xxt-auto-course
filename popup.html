@@ -250,6 +250,111 @@
     .save-btn:active {
       transform: translateY(0);
     }
+
+    .answer-mode {
+      margin-bottom: 16px;
+    }
+
+    .mode-selector {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    .mode-btn {
+      flex: 1;
+      min-width: 80px;
+      padding: 8px 12px;
+      background: #f3f4f6;
+      border: 2px solid transparent;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 500;
+      color: #666;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-align: center;
+    }
+
+    .mode-btn:hover {
+      background: #e5e7eb;
+    }
+
+    .mode-btn.active {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-color: #667eea;
+    }
+
+    .api-config {
+      background: #f8fafc;
+      border-radius: 10px;
+      padding: 14px;
+      margin-top: 12px;
+      display: none;
+    }
+
+    .api-config.show {
+      display: block;
+    }
+
+    .api-config h3 {
+      font-size: 13px;
+      font-weight: 600;
+      color: #1a1a2e;
+      margin-bottom: 10px;
+    }
+
+    .api-input {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      font-size: 12px;
+      margin-bottom: 8px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .api-input:focus {
+      border-color: #667eea;
+    }
+
+    .api-input::placeholder {
+      color: #999;
+    }
+
+    .api-label {
+      font-size: 11px;
+      color: #666;
+      margin-bottom: 4px;
+      display: block;
+    }
+
+    .status-indicator-small {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: #666;
+      margin-top: 8px;
+    }
+
+    .status-dot-small {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #ccc;
+    }
+
+    .status-dot-small.success {
+      background: #10b981;
+    }
+
+    .status-dot-small.error {
+      background: #ef4444;
+    }
   </style>
 </head>
 <body>
@@ -270,10 +375,30 @@
       </div>
     </div>
 
+    <div class="divider"></div>
+
     <div class="control-group">
       <div class="control-label">
-        <span>自动答题</span>
-        <div class="toggle-switch" id="toggleAnswer" onclick="toggleAnswer()"></div>
+        <span>答题模式</span>
+      </div>
+      <div class="answer-mode">
+        <div class="mode-selector">
+          <button class="mode-btn active" id="modeRandom" onclick="setAnswerMode('random')">随机</button>
+          <button class="mode-btn" id="modeBank" onclick="setAnswerMode('bank')">题库</button>
+          <button class="mode-btn" id="modeAI" onclick="setAnswerMode('ai')">AI答题</button>
+        </div>
+
+        <div class="api-config" id="apiConfig">
+          <h3>AI API 配置</h3>
+          <label class="api-label">API 地址（OpenAI 兼容）</label>
+          <input type="text" class="api-input" id="apiUrl" placeholder="https://api.openai.com/v1/chat/completions">
+          <label class="api-label">API 密钥</label>
+          <input type="password" class="api-input" id="apiKey" placeholder="sk-...">
+          <div class="status-indicator-small">
+            <div class="status-dot-small" id="apiStatusDot"></div>
+            <span id="apiStatusText">未配置</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -303,7 +428,7 @@
       </h3>
       <ul>
         <li>打开学习通课程页面后点击开启</li>
-        <li>自动答题功能会尝试随机选择答案</li>
+        <li>答题模式：随机（随机选择）/ 题库（关键词匹配）/ AI（智能答题）</li>
         <li>倍速过高可能导致课程无效</li>
         <li>视频结束后会自动切换下一章</li>
       </ul>

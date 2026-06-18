@@ -4,7 +4,10 @@
 let settings = {
   isRunning: false,
   playbackSpeed: 1.5,
-  autoAnswer: true
+  autoAnswer: true,
+  answerMode: 'random', // random | bank | ai
+  apiUrl: '',
+  apiKey: ''
 };
 
 // 页面加载完成后初始化
@@ -16,10 +19,20 @@ document.addEventListener('DOMContentLoaded', () => {
 // 从存储加载设置
 async function loadSettings() {
   try {
-    const result = await chrome.storage.sync.get(['isRunning', 'playbackSpeed', 'autoAnswer']);
+    const result = await chrome.storage.sync.get([
+      'isRunning',
+      'playbackSpeed',
+      'autoAnswer',
+      'answerMode',
+      'apiUrl',
+      'apiKey'
+    ]);
     settings.isRunning = result.isRunning ?? true;
     settings.playbackSpeed = result.playbackSpeed ?? 1.5;
     settings.autoAnswer = result.autoAnswer ?? true;
+    settings.answerMode = result.answerMode ?? 'random';
+    settings.apiUrl = result.apiUrl ?? '';
+    settings.apiKey = result.apiKey ?? '';
     updateUI();
   } catch (error) {
     console.error('加载设置失败:', error);
@@ -29,10 +42,17 @@ async function loadSettings() {
 // 保存设置到存储
 async function saveSettings() {
   try {
+    // 从输入框获取最新的API配置
+    settings.apiUrl = document.getElementById('apiUrl').value.trim();
+    settings.apiKey = document.getElementById('apiKey').value.trim();
+
     await chrome.storage.sync.set({
       isRunning: settings.isRunning,
       playbackSpeed: settings.playbackSpeed,
-      autoAnswer: settings.autoAnswer
+      autoAnswer: settings.autoAnswer,
+      answerMode: settings.answerMode,
+      apiUrl: settings.apiUrl,
+      apiKey: settings.apiKey
     });
 
     // 向当前标签页的内容脚本发送更新
@@ -70,7 +90,6 @@ function updateUI() {
 
   // 更新开关状态
   const toggleAuto = document.getElementById('toggleAuto');
-  const toggleAnswer = document.getElementById('toggleAnswer');
 
   if (settings.isRunning) {
     toggleAuto.classList.add('active');
@@ -78,10 +97,40 @@ function updateUI() {
     toggleAuto.classList.remove('active');
   }
 
-  if (settings.autoAnswer) {
-    toggleAnswer.classList.add('active');
+  // 更新答题模式按钮
+  document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+  const modeBtn = document.getElementById('mode' + settings.answerMode.charAt(0).toUpperCase() + settings.answerMode.slice(1));
+  if (modeBtn) modeBtn.classList.add('active');
+
+  // 更新API配置显示
+  const apiConfig = document.getElementById('apiConfig');
+  const apiUrlInput = document.getElementById('apiUrl');
+  const apiKeyInput = document.getElementById('apiKey');
+  const apiStatusDot = document.getElementById('apiStatusDot');
+  const apiStatusText = document.getElementById('apiStatusText');
+
+  if (settings.answerMode === 'ai') {
+    apiConfig.classList.add('show');
   } else {
-    toggleAnswer.classList.remove('active');
+    apiConfig.classList.remove('show');
+  }
+
+  // 填充API配置
+  if (apiUrlInput) apiUrlInput.value = settings.apiUrl || '';
+  if (apiKeyInput) apiKeyInput.value = settings.apiKey || '';
+
+  // 更新API状态
+  if (settings.answerMode === 'ai') {
+    if (settings.apiUrl && settings.apiKey) {
+      apiStatusDot.className = 'status-dot-small success';
+      apiStatusText.textContent = '已配置';
+    } else if (settings.apiUrl || settings.apiKey) {
+      apiStatusDot.className = 'status-dot-small error';
+      apiStatusText.textContent = '配置不完整';
+    } else {
+      apiStatusDot.className = 'status-dot-small';
+      apiStatusText.textContent = '未配置';
+    }
   }
 
   // 更新倍速显示
@@ -108,15 +157,15 @@ function updatePresetButtons() {
   });
 }
 
-// 切换自动刷课开关
-function toggleAuto() {
-  settings.isRunning = !settings.isRunning;
+// 设置答题模式
+function setAnswerMode(mode) {
+  settings.answerMode = mode;
   updateUI();
 }
 
-// 切换自动答题开关
-function toggleAnswer() {
-  settings.autoAnswer = !settings.autoAnswer;
+// 切换自动刷课开关
+function toggleAuto() {
+  settings.isRunning = !settings.isRunning;
   updateUI();
 }
 
