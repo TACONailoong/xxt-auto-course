@@ -371,7 +371,7 @@
     <div class="control-group">
       <div class="control-label">
         <span>开启自动刷课</span>
-        <div class="toggle-switch" id="toggleAuto" onclick="toggleAuto()"></div>
+        <div class="toggle-switch" id="toggleAuto"></div>
       </div>
     </div>
 
@@ -383,9 +383,9 @@
       </div>
       <div class="answer-mode">
         <div class="mode-selector">
-          <button class="mode-btn active" id="modeRandom" onclick="setAnswerMode('random')">随机</button>
-          <button class="mode-btn" id="modeBank" onclick="setAnswerMode('bank')">题库</button>
-          <button class="mode-btn" id="modeAI" onclick="setAnswerMode('ai')">AI答题</button>
+          <button class="mode-btn active" id="modeRandom">随机</button>
+          <button class="mode-btn" id="modeBank">题库</button>
+          <button class="mode-btn" id="modeAI">AI答题</button>
         </div>
 
         <div class="api-config" id="apiConfig">
@@ -410,12 +410,12 @@
       </div>
       <div class="speed-control">
         <div class="speed-value" id="speedValue">1.5x</div>
-        <input type="range" class="speed-slider" id="speedSlider" min="0.5" max="4" step="0.25" value="1.5" oninput="updateSpeed()">
+        <input type="range" class="speed-slider" id="speedSlider" min="0.5" max="4" step="0.25" value="1.5">
         <div class="speed-presets">
-          <button class="preset-btn" onclick="setSpeed(1)">1x</button>
-          <button class="preset-btn active" onclick="setSpeed(1.5)">1.5x</button>
-          <button class="preset-btn" onclick="setSpeed(2)">2x</button>
-          <button class="preset-btn" onclick="setSpeed(3)">3x</button>
+          <button class="preset-btn" data-speed="1">1x</button>
+          <button class="preset-btn active" data-speed="1.5">1.5x</button>
+          <button class="preset-btn" data-speed="2">2x</button>
+          <button class="preset-btn" data-speed="3">3x</button>
         </div>
       </div>
     </div>
@@ -434,7 +434,7 @@
       </ul>
     </div>
 
-    <button class="save-btn" onclick="saveSettings()">保存设置</button>
+    <button class="save-btn">保存设置</button>
 
     <div class="footer">
       版本 1.0.0 · 仅供学习交流使用

@@ -5,16 +5,66 @@ let settings = {
   isRunning: false,
   playbackSpeed: 1.5,
   autoAnswer: true,
-  answerMode: 'random', // random | bank | ai
+  answerMode: 'random',
   apiUrl: '',
   apiKey: ''
 };
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', () => {
+  initEventListeners();
   loadSettings();
-  updateUI();
 });
+
+// 初始化事件监听
+function initEventListeners() {
+  // 自动刷课开关
+  const toggleAuto = document.getElementById('toggleAuto');
+  toggleAuto.addEventListener('click', () => {
+    settings.isRunning = !settings.isRunning;
+    updateUI();
+    saveSettings();
+  });
+
+  // 答题模式按钮
+  document.getElementById('modeRandom').addEventListener('click', () => {
+    settings.answerMode = 'random';
+    updateUI();
+    saveSettings();
+  });
+
+  document.getElementById('modeBank').addEventListener('click', () => {
+    settings.answerMode = 'bank';
+    updateUI();
+    saveSettings();
+  });
+
+  document.getElementById('modeAI').addEventListener('click', () => {
+    settings.answerMode = 'ai';
+    updateUI();
+    saveSettings();
+  });
+
+  // 倍速滑块
+  const speedSlider = document.getElementById('speedSlider');
+  speedSlider.addEventListener('input', updateSpeed);
+
+  // 倍速预设按钮
+  document.querySelectorAll('.preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const speed = parseFloat(btn.dataset.speed);
+      setSpeed(speed);
+    });
+  });
+
+  // 保存按钮
+  const saveBtn = document.querySelector('.save-btn');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', () => {
+      saveSettings();
+    });
+  }
+}
 
 // 从存储加载设置
 async function loadSettings() {
@@ -27,7 +77,7 @@ async function loadSettings() {
       'apiUrl',
       'apiKey'
     ]);
-    settings.isRunning = result.isRunning ?? true;
+    settings.isRunning = result.isRunning ?? false;
     settings.playbackSpeed = result.playbackSpeed ?? 1.5;
     settings.autoAnswer = result.autoAnswer ?? true;
     settings.answerMode = result.answerMode ?? 'random';
@@ -43,8 +93,10 @@ async function loadSettings() {
 async function saveSettings() {
   try {
     // 从输入框获取最新的API配置
-    settings.apiUrl = document.getElementById('apiUrl').value.trim();
-    settings.apiKey = document.getElementById('apiKey').value.trim();
+    const apiUrlInput = document.getElementById('apiUrl');
+    const apiKeyInput = document.getElementById('apiKey');
+    if (apiUrlInput) settings.apiUrl = apiUrlInput.value.trim();
+    if (apiKeyInput) settings.apiKey = apiKeyInput.value.trim();
 
     await chrome.storage.sync.set({
       isRunning: settings.isRunning,
@@ -62,7 +114,7 @@ async function saveSettings() {
         type: 'UPDATE_SETTINGS',
         settings: settings
       }).catch(err => {
-        console.log('发送消息失败:', err);
+        console.log('发送消息失败，可能不在学习通页面');
       });
     }
 
@@ -90,37 +142,41 @@ function updateUI() {
 
   // 更新开关状态
   const toggleAuto = document.getElementById('toggleAuto');
-
-  if (settings.isRunning) {
-    toggleAuto.classList.add('active');
-  } else {
-    toggleAuto.classList.remove('active');
+  if (toggleAuto) {
+    if (settings.isRunning) {
+      toggleAuto.classList.add('active');
+    } else {
+      toggleAuto.classList.remove('active');
+    }
   }
 
   // 更新答题模式按钮
   document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
-  const modeBtn = document.getElementById('mode' + settings.answerMode.charAt(0).toUpperCase() + settings.answerMode.slice(1));
+  const modeId = 'mode' + settings.answerMode.charAt(0).toUpperCase() + settings.answerMode.slice(1);
+  const modeBtn = document.getElementById(modeId);
   if (modeBtn) modeBtn.classList.add('active');
 
   // 更新API配置显示
   const apiConfig = document.getElementById('apiConfig');
+  if (apiConfig) {
+    if (settings.answerMode === 'ai') {
+      apiConfig.classList.add('show');
+    } else {
+      apiConfig.classList.remove('show');
+    }
+  }
+
+  // 填充API配置
   const apiUrlInput = document.getElementById('apiUrl');
   const apiKeyInput = document.getElementById('apiKey');
   const apiStatusDot = document.getElementById('apiStatusDot');
   const apiStatusText = document.getElementById('apiStatusText');
 
-  if (settings.answerMode === 'ai') {
-    apiConfig.classList.add('show');
-  } else {
-    apiConfig.classList.remove('show');
-  }
-
-  // 填充API配置
   if (apiUrlInput) apiUrlInput.value = settings.apiUrl || '';
   if (apiKeyInput) apiKeyInput.value = settings.apiKey || '';
 
   // 更新API状态
-  if (settings.answerMode === 'ai') {
+  if (settings.answerMode === 'ai' && apiStatusDot && apiStatusText) {
     if (settings.apiUrl && settings.apiKey) {
       apiStatusDot.className = 'status-dot-small success';
       apiStatusText.textContent = '已配置';
@@ -137,8 +193,8 @@ function updateUI() {
   const speedSlider = document.getElementById('speedSlider');
   const speedValue = document.getElementById('speedValue');
 
-  speedSlider.value = settings.playbackSpeed;
-  speedValue.textContent = settings.playbackSpeed + 'x';
+  if (speedSlider) speedSlider.value = settings.playbackSpeed;
+  if (speedValue) speedValue.textContent = settings.playbackSpeed + 'x';
 
   // 更新预设按钮状态
   updatePresetButtons();
@@ -157,28 +213,15 @@ function updatePresetButtons() {
   });
 }
 
-// 设置答题模式
-function setAnswerMode(mode) {
-  settings.answerMode = mode;
-  updateUI();
-  saveSettings(); // 自动保存
-}
-
-// 切换自动刷课开关
-function toggleAuto() {
-  settings.isRunning = !settings.isRunning;
-  updateUI();
-  saveSettings(); // 自动保存
-}
-
 // 更新倍速值
 function updateSpeed() {
   const speedSlider = document.getElementById('speedSlider');
   const speedValue = document.getElementById('speedValue');
 
   settings.playbackSpeed = parseFloat(speedSlider.value);
-  speedValue.textContent = settings.playbackSpeed + 'x';
+  if (speedValue) speedValue.textContent = settings.playbackSpeed + 'x';
   updatePresetButtons();
+  saveSettings(); // 滑块变化时自动保存
 }
 
 // 设置固定倍速
@@ -187,15 +230,21 @@ function setSpeed(speed) {
   const speedSlider = document.getElementById('speedSlider');
   const speedValue = document.getElementById('speedValue');
 
-  speedSlider.value = speed;
-  speedValue.textContent = speed + 'x';
+  if (speedSlider) speedSlider.value = speed;
+  if (speedValue) speedValue.textContent = speed + 'x';
   updatePresetButtons();
+  saveSettings();
 }
 
 // 显示通知
 function showNotification(message) {
+  // 移除已有的通知
+  const existing = document.querySelector('.notification-toast');
+  if (existing) existing.remove();
+
   // 创建通知元素
   const notification = document.createElement('div');
+  notification.className = 'notification-toast';
   notification.textContent = message;
   notification.style.cssText = `
     position: fixed;
@@ -213,21 +262,6 @@ function showNotification(message) {
     animation: slideDown 0.3s ease;
   `;
 
-  // 添加动画样式
-  const style = document.createElement('style');
-  style.textContent = `
-    @keyframes slideDown {
-      from {
-        opacity: 0;
-        transform: translateX(-50%) translateY(-20px);
-      }
-      to {
-        opacity: 1;
-        transform: translateX(-50%) translateY(0);
-      }
-    }
-  `;
-  document.head.appendChild(style);
   document.body.appendChild(notification);
 
   // 2秒后移除通知
@@ -235,7 +269,6 @@ function showNotification(message) {
     notification.style.animation = 'slideDown 0.3s ease reverse';
     setTimeout(() => {
       notification.remove();
-      style.remove();
     }, 300);
   }, 2000);
 }
