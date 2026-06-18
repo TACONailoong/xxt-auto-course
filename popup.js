@@ -161,12 +161,14 @@ function updatePresetButtons() {
 function setAnswerMode(mode) {
   settings.answerMode = mode;
   updateUI();
+  saveSettings(); // 自动保存
 }
 
 // 切换自动刷课开关
 function toggleAuto() {
   settings.isRunning = !settings.isRunning;
   updateUI();
+  saveSettings(); // 自动保存
 }
 
 // 更新倍速值
