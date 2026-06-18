@@ -1,578 +1,720 @@
-// 学习通自动刷课插件 - 内容脚本
-// 功能：自动播放视频、倍速播放、自动答题、下一章自动切换
+// 学习通自动刷课插件 - 内容脚本 (content.js)
+// 修复：支持 iframe 视频、学习通自定义 DOM、事件分发、SPA 导航
 
-// 绕过自动化检测
-Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-window.navigator.chrome = { runtime: {} };
+(function () {
+  'use strict';
 
-// 随机延迟函数
-const randomDelay = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+  // 避免在同一 frame 中重复初始化
+  if (window.__XXT_AUTO_PLAYER_LOADED__) return;
+  window.__XXT_AUTO_PLAYER_LOADED__ = true;
 
-class XueXiTongAutoPlayer {
-  constructor() {
-    this.isRunning = false;
-    this.playbackSpeed = 1.5; // 默认倍速
-    this.autoAnswer = true; // 自动答题
-    this.answerMode = 'random'; // 答题模式：random | bank | ai
-    this.apiUrl = ''; // AI API 地址
-    this.apiKey = ''; // AI API 密钥
-    this.currentVideo = null;
-    this.observer = null;
-    this.quizBank = null; // 本地题库
-    this.init();
-  }
+  const randomDelay = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
-  async init() {
-    // 等待页面加载完成
-    await this.waitForPageReady();
-    // 加载用户设置
-    await this.loadSettings();
-    // 加载题库
-    await this.loadQuizBank();
-    // 开始监听视频
-    this.startVideoObserver();
-    // 初始化完成
-    console.log('学习通自动刷课插件已启动', {
-      isRunning: this.isRunning,
-      playbackSpeed: this.playbackSpeed,
-      autoAnswer: this.autoAnswer,
-      answerMode: this.answerMode
-    });
-  }
-
-  // 等待页面准备就绪
-  async waitForPageReady() {
-    return new Promise(resolve => {
-      if (document.readyState === 'complete') {
-        setTimeout(resolve, 1000); // 额外等待1秒确保元素加载
-      } else {
-        window.addEventListener('load', () => {
-          setTimeout(resolve, 1000);
-        });
-      }
-    });
-  }
-
-  // 从存储加载设置
-  async loadSettings() {
+  // 触发真实点击事件（兼容 Vue/React 框架的事件监听）
+  function realClick(el) {
+    if (!el) return false;
     try {
-      const result = await chrome.storage.sync.get([
-        'isRunning',
-        'playbackSpeed',
-        'autoAnswer',
-        'answerMode',
-        'apiUrl',
-        'apiKey'
-      ]);
-      this.isRunning = result.isRunning ?? true;
-      this.playbackSpeed = result.playbackSpeed ?? 1.5;
-      this.autoAnswer = result.autoAnswer ?? true;
-      this.answerMode = result.answerMode ?? 'random';
-      this.apiUrl = result.apiUrl ?? '';
-      this.apiKey = result.apiKey ?? '';
-    } catch (error) {
-      console.error('加载设置失败:', error);
+      const rect = el.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+
+      el.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true, cancelable: true, view: window, clientX: x, clientY: y
+      }));
+      el.dispatchEvent(new MouseEvent('mouseup', {
+        bubbles: true, cancelable: true, view: window, clientX: x, clientY: y
+      }));
+      el.dispatchEvent(new MouseEvent('click', {
+        bubbles: true, cancelable: true, view: window, clientX: x, clientY: y
+      }));
+      return true;
+    } catch (e) {
+      try {
+        el.click();
+        return true;
+      } catch (err) {
+        return false;
+      }
     }
   }
 
-  // 加载本地题库
-  async loadQuizBank() {
-    try {
-      const response = await fetch(chrome.runtime.getURL('quiz-bank.json'));
-      if (response.ok) {
-        this.quizBank = await response.json();
-        console.log('题库加载成功，题目数量:', this.quizBank?.questions?.length || 0);
-      }
-    } catch (error) {
-      console.log('题库加载失败:', error);
+  // 判断元素是否可见
+  function isVisible(el) {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden' || +style.opacity === 0) return false;
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return false;
+    return true;
+  }
+
+  class AutoPlayer {
+    constructor() {
+      this.settings = {
+        isRunning: false,
+        playbackSpeed: 1.5,
+        autoAnswer: true,
+        answerMode: 'random',
+        apiUrl: '',
+        apiKey: ''
+      };
+      this.currentVideo = null;
+      this.answeredQuestionIds = new Set();
+      this.isAnswering = false;
+      this.lastAnswerAttempt = 0;
+      this.speedLockInterval = null;
+      this.observer = null;
       this.quizBank = null;
-    }
-  }
-
-  // 监听视频元素
-  startVideoObserver() {
-    // 初始检测
-    this.detectAndSetupVideo();
-
-    // 监听DOM变化，处理动态加载的视频
-    this.observer = new MutationObserver(() => {
-      this.detectAndSetupVideo();
-    });
-
-    this.observer.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
-  }
-
-  // 检测并设置视频
-  detectAndSetupVideo() {
-    if (!this.isRunning) return;
-
-    // 尝试多种选择器找到视频
-    const videoSelectors = [
-      'video',
-      '.ans-attach-ct video',
-      '.video  video',
-      '#video',
-      '.ans-video-player video'
-    ];
-
-    let video = null;
-    for (const selector of videoSelectors) {
-      video = document.querySelector(selector);
-      if (video) break;
+      this.init();
     }
 
-    if (video && video !== this.currentVideo) {
-      this.currentVideo = video;
-      this.setupVideo(video);
-    }
-  }
-
-  // 设置视频播放器
-  setupVideo(video) {
-    if (!video) return;
-
-    // 随机延迟后再操作，模拟人类行为
-    setTimeout(() => {
-      // 设置播放速度
-      video.playbackRate = this.playbackSpeed;
-
-      // 如果视频未播放，自动播放
-      if (video.paused && this.isRunning) {
-        video.play().catch(err => {
-          console.log('自动播放被阻止:', err);
-        });
-      }
-    }, randomDelay(500, 1500));
-
-    // 监听视频播放事件
-    video.addEventListener('play', () => {
-      video.playbackRate = this.playbackSpeed;
-      this.onVideoPlay(video);
-    });
-
-    // 监听视频进度更新
-    video.addEventListener('timeupdate', () => {
-      this.onTimeUpdate(video);
-    });
-
-    // 监听视频结束
-    video.addEventListener('ended', () => {
-      this.onVideoEnded(video);
-    });
-
-    // 监听倍速设置
-    video.addEventListener('ratechange', () => {
-      if (video.playbackRate !== this.playbackSpeed) {
-        video.playbackRate = this.playbackSpeed;
-      }
-    });
-  }
-
-  // 视频开始播放
-  onVideoPlay(video) {
-    console.log('视频开始播放，倍速:', this.playbackSpeed);
-    // 持续确保倍速设置
-    setInterval(() => {
-      if (video.playbackRate !== this.playbackSpeed) {
-        video.playbackRate = this.playbackSpeed;
-      }
-    }, 1000);
-  }
-
-  // 视频进度更新
-  onTimeUpdate(video) {
-    // 检测答题弹窗
-    if (this.autoAnswer) {
-      this.checkAndAnswerQuestion();
-    }
-  }
-
-  // 检测并答题
-  checkAndAnswerQuestion() {
-    // 学习通答题弹窗的选择器
-    const questionSelectors = [
-      '.answer-tag', // 答题标签
-      '.TiKu_dialog', // 题库弹窗
-      '.ans-video-quiz', // 视频答题
-      '.ans-paper-quiz', // 试卷答题
-      '.quiz_option', // 答题选项
-      'input[type="radio"]', // 单选按钮
-      'input[type="checkbox"]' // 多选按钮
-    ];
-
-    let questionElement = null;
-    for (const selector of questionSelectors) {
-      const elements = document.querySelectorAll(selector);
-      if (elements.length > 0) {
-        // 过滤掉隐藏的元素
-        for (const el of elements) {
-          const style = window.getComputedStyle(el);
-          if (style.display !== 'none' && style.visibility !== 'hidden') {
-            questionElement = el;
-            break;
-          }
+    async init() {
+      await this.loadSettings();
+      await this.loadQuizBank();
+      this.startWatching();
+      this.startNavigationWatch();
+      // 定期检查是否需要播放视频（处理延迟加载）
+      setInterval(() => {
+        if (this.settings.isRunning) {
+          this.ensureVideoPlaying();
         }
-        if (questionElement) break;
+      }, 3000);
+
+      // 定期检查是否需要切换章节
+      setInterval(() => {
+        if (this.settings.isRunning) {
+          this.checkAndGoNext();
+        }
+      }, 5000);
+
+      console.log('%c[学习通自动刷课] 已启用', 'color:#10b981;font-weight:bold', this.settings);
+    }
+
+    async loadSettings() {
+      try {
+        const result = await chrome.storage.sync.get([
+          'isRunning', 'playbackSpeed', 'autoAnswer',
+          'answerMode', 'apiUrl', 'apiKey'
+        ]);
+        this.settings.isRunning = result.isRunning ?? false;
+        this.settings.playbackSpeed = result.playbackSpeed ?? 1.5;
+        this.settings.autoAnswer = result.autoAnswer ?? true;
+        this.settings.answerMode = result.answerMode ?? 'random';
+        this.settings.apiUrl = result.apiUrl ?? '';
+        this.settings.apiKey = result.apiKey ?? '';
+      } catch (e) {
+        console.error('[学习通自动刷课] 加载设置失败', e);
       }
     }
 
-    if (questionElement) {
-      this.autoAnswerQuestion();
-    }
-  }
-
-  // 获取题目文本
-  getQuestionText() {
-    // 尝试多种选择器获取题目文本
-    const questionSelectors = [
-      '.quiz_question',
-      '.question-title',
-      '.question_text',
-      '.ans-question-text',
-      'h3',
-      '.title'
-    ];
-
-    for (const selector of questionSelectors) {
-      const element = document.querySelector(selector);
-      if (element && element.textContent.trim()) {
-        return element.textContent.trim();
+    async loadQuizBank() {
+      try {
+        const url = chrome.runtime.getURL('quiz-bank.json');
+        const response = await fetch(url);
+        if (response.ok) {
+          this.quizBank = await response.json();
+        }
+      } catch (e) {
+        // 题库加载失败不影响主流程
       }
     }
-    return '';
-  }
 
-  // 模式1：随机答题
-  answerRandomly() {
-    try {
-      const radios = document.querySelectorAll('input[type="radio"]');
-      const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+    // 设置观察者监听 DOM 变化
+    startWatching() {
+      // 立即执行一次
+      this.detectAndSetupVideo();
+      this.detectAndAnswerQuestion();
 
-      // 随机延迟后再答题
-      setTimeout(() => {
-        if (radios.length > 0) {
-          const randomIndex = Math.floor(Math.random() * radios.length);
-          radios[randomIndex].click();
-          console.log('自动答题（随机）：已选择单选答案');
-        } else if (checkboxes.length > 0) {
-          const indices = [];
-          const numToSelect = Math.ceil(checkboxes.length / 2);
-          while (indices.length < numToSelect) {
-            const idx = Math.floor(Math.random() * checkboxes.length);
-            if (!indices.includes(idx)) {
-              indices.push(idx);
+      if (this.observer) return;
+      this.observer = new MutationObserver(() => {
+        this.detectAndSetupVideo();
+        this.detectAndAnswerQuestion();
+      });
+      this.observer.observe(document.documentElement || document.body, {
+        childList: true,
+        subtree: true
+      });
+    }
+
+    // 监听 URL 变化（SPA 导航）
+    startNavigationWatch() {
+      let lastUrl = location.href;
+      setInterval(() => {
+        if (location.href !== lastUrl) {
+          lastUrl = location.href;
+          this.currentVideo = null;
+          this.answeredQuestionIds.clear();
+          // URL 变化后延迟重新检测
+          setTimeout(() => this.detectAndSetupVideo(), 2000);
+        }
+      }, 2000);
+    }
+
+    // 查找视频元素（包括在 iframe 中）
+    findVideoElement() {
+      // 1. 直接在当前文档查找
+      let video = document.querySelector('video');
+      if (video && isVisible(video)) return video;
+
+      // 2. 查找多个可能的 video 容器
+      const videoSelectors = [
+        'video',
+        '.ans-attach-ct video',
+        '.ans-video video',
+        '.video-box video',
+        '.video-wrapper video',
+        '.player video',
+        '.video-player video',
+        '.vjs-tech',
+        '#video_html5_api',
+        'video.video-js'
+      ];
+
+      for (const sel of videoSelectors) {
+        const el = document.querySelector(sel);
+        if (el && isVisible(el)) return el;
+      }
+
+      // 3. 遍历所有 video
+      const allVideos = document.querySelectorAll('video');
+      for (const v of allVideos) {
+        if (isVisible(v) && v.src) return v;
+      }
+
+      return null;
+    }
+
+    // 检测并设置视频
+    detectAndSetupVideo() {
+      if (!this.settings.isRunning) return;
+
+      const video = this.findVideoElement();
+      if (video && video !== this.currentVideo) {
+        this.currentVideo = video;
+        this.setupVideo(video);
+        console.log('[学习通自动刷课] 找到视频元素');
+      }
+    }
+
+    setupVideo(video) {
+      if (!video) return;
+
+      // 倍速锁定 - 定期强制设置倍速
+      if (this.speedLockInterval) clearInterval(this.speedLockInterval);
+      this.speedLockInterval = setInterval(() => {
+        if (this.currentVideo && this.settings.isRunning) {
+          if (this.currentVideo.playbackRate !== this.settings.playbackSpeed) {
+            try {
+              this.currentVideo.playbackRate = this.settings.playbackSpeed;
+            } catch (e) {
+              try {
+                Object.defineProperty(this.currentVideo, 'playbackRate', {
+                  value: this.settings.playbackSpeed,
+                  writable: true
+                });
+              } catch (e2) {}
             }
           }
-          indices.forEach(idx => checkboxes[idx].click());
-          console.log('自动答题（随机）：已选择多选答案');
         }
-      }, randomDelay(300, 800));
-      return true;
-    } catch (error) {
-      console.log('随机答题失败:', error);
+      }, 1000);
+
+      // 尝试播放
+      setTimeout(() => {
+        video.playbackRate = this.settings.playbackSpeed;
+        if (video.paused && this.settings.isRunning) {
+          const playPromise = video.play();
+          if (playPromise && playPromise.catch) {
+            playPromise.catch(err => {
+              console.log('[学习通自动刷课] 自动播放被阻止，尝试模拟点击');
+              // 尝试模拟点击播放按钮
+              const playBtn = document.querySelector('.vjs-big-play-button, .play-btn, .play-btn-icon, [class*="play"]');
+              if (playBtn && isVisible(playBtn)) realClick(playBtn);
+            });
+          }
+        }
+      }, randomDelay(500, 1500));
+
+      // 监听视频事件
+      video.addEventListener('play', () => {
+        video.playbackRate = this.settings.playbackSpeed;
+      });
+      video.addEventListener('ratechange', () => {
+        if (video.playbackRate !== this.settings.playbackSpeed) {
+          video.playbackRate = this.settings.playbackSpeed;
+        }
+      });
+      video.addEventListener('timeupdate', () => {
+        // 持续锁定倍速
+        if (video.playbackRate !== this.settings.playbackSpeed) {
+          try { video.playbackRate = this.settings.playbackSpeed; } catch (e) {}
+        }
+        // 检查答题
+        if (this.settings.autoAnswer) {
+          this.detectAndAnswerQuestion();
+        }
+      });
+      video.addEventListener('ended', () => {
+        console.log('[学习通自动刷课] 视频播放完成，准备进入下一节');
+        setTimeout(() => {
+          this.goToNextChapter();
+        }, 1500);
+      });
+      video.addEventListener('pause', () => {
+        // 如果视频被暂停但不是因为结束，尝试恢复播放
+        if (!video.ended && this.settings.isRunning) {
+          setTimeout(() => {
+            // 检查是否有答题弹窗阻挡
+            const hasPopup = this.hasAnswerPopup();
+            if (!hasPopup && this.settings.isRunning) {
+              video.play().catch(() => {});
+            }
+          }, 1000);
+        }
+      });
+    }
+
+    // 确保视频正在播放
+    ensureVideoPlaying() {
+      if (!this.currentVideo) {
+        this.detectAndSetupVideo();
+      }
+      if (this.currentVideo && this.currentVideo.paused && !this.currentVideo.ended && this.settings.isRunning) {
+        const hasPopup = this.hasAnswerPopup();
+        if (!hasPopup) {
+          this.currentVideo.play().catch(() => {});
+        }
+      }
+    }
+
+    // 是否有答题弹窗
+    hasAnswerPopup() {
+      const popupSelectors = [
+        '.ans-videoquiz-title',
+        '.ans-videoquiz-wrap',
+        '.ans-videoquiz-opt',
+        '.ans-popup-tips',
+        '[class*="videoquiz"]',
+        '[class*="quiz"]',
+        '.ans-ques',
+        '.ans-question'
+      ];
+      for (const sel of popupSelectors) {
+        const el = document.querySelector(sel);
+        if (el && isVisible(el)) return true;
+      }
       return false;
     }
-  }
 
-  // 模式2：题库答题
-  answerFromBank(questionText) {
-    if (!this.quizBank || !this.quizBank.questions) {
-      console.log('题库为空或未加载， fallback 到随机答题');
-      return this.answerRandomly();
+    // 检测是否有题目，并答题
+    detectAndAnswerQuestion() {
+      if (!this.settings.isRunning || !this.settings.autoAnswer) return;
+      if (this.isAnswering) return;
+
+      // 节流：至少间隔 1 秒才检查一次
+      const now = Date.now();
+      if (now - this.lastAnswerAttempt < 1500) return;
+      this.lastAnswerAttempt = now;
+
+      const questionInfo = this.findQuestion();
+      if (!questionInfo) return;
+
+      // 防止重复答同一题（通过选项数量 + 题目前几个字符）
+      const qId = `${questionInfo.options.length}_${questionInfo.text.substring(0, 20)}`;
+      if (this.answeredQuestionIds.has(qId)) return;
+
+      console.log('[学习通自动刷课] 检测到题目:', questionInfo.text.substring(0, 30));
+      this.isAnswering = true;
+      this.answeredQuestionIds.add(qId);
+
+      this.answerQuestion(questionInfo).then(() => {
+        setTimeout(() => {
+          this.isAnswering = false;
+        }, 2000);
+      }).catch(() => {
+        this.isAnswering = false;
+      });
     }
 
-    try {
-      // 关键词匹配
-      const matchedQuestion = this.quizBank.questions.find(q => {
-        if (!q.keywords || !Array.isArray(q.keywords)) return false;
-        return q.keywords.some(keyword => questionText.includes(keyword));
+    // 查找题目
+    findQuestion() {
+      // 遍历所有可能的题目容器
+      const quizContainers = [
+        '.ans-videoquiz-wrap',
+        '.ans-videoquiz-title',
+        '.ans-videoquiz-question',
+        '.ans-paper-quiz',
+        '.ans-tiku',
+        '[class*="quiz"]',
+        '[class*="question"]',
+        '.ans-question',
+        '.ans-ques'
+      ];
+
+      let questionText = '';
+      let options = [];
+
+      // 1. 获取题目文本
+      const textSelectors = [
+        '.ans-videoquiz-title',
+        '.ans-videoquiz-question .title',
+        '.ans-videoquiz-question-title',
+        '[class*="question-title"]',
+        '.quiz_question',
+        '.question-title',
+        '.question_text',
+        '.ans-question-text',
+        'h3',
+        '.title'
+      ];
+      for (const sel of textSelectors) {
+        const el = document.querySelector(sel);
+        if (el && isVisible(el) && el.textContent.trim().length > 2) {
+          questionText = el.textContent.trim();
+          break;
+        }
+      }
+
+      // 2. 获取选项（支持多种结构：自定义 radio、input[type=radio]、li、div）
+      options = this.findOptions();
+
+      if (options.length > 0) {
+        return { text: questionText, options: options };
+      }
+      return null;
+    }
+
+    // 查找选项
+    findOptions() {
+      const options = [];
+      const seen = new Set();
+
+      // 方法1：查找原生 radio
+      const radios = document.querySelectorAll('input[type="radio"]');
+      radios.forEach(r => {
+        if (isVisible(r) && !seen.has(r)) {
+          seen.add(r);
+          options.push({ element: r, text: r.parentElement?.textContent?.trim() || '', type: 'radio' });
+        }
       });
 
-      if (matchedQuestion && matchedQuestion.answer) {
-        const answer = matchedQuestion.answer.toUpperCase();
-        const radios = document.querySelectorAll('input[type="radio"]');
-        const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+      // 方法2：查找原生 checkbox
+      const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+      checkboxes.forEach(c => {
+        if (isVisible(c) && !seen.has(c)) {
+          seen.add(c);
+          options.push({ element: c, text: c.parentElement?.textContent?.trim() || '', type: 'checkbox' });
+        }
+      });
 
-        // 延迟后再答题
-        setTimeout(() => {
-          if (matchedQuestion.type === 'single' || radios.length > 0) {
-            const index = answer.charCodeAt(0) - 65;
-            if (index >= 0 && index < radios.length) {
-              radios[index].click();
-              console.log('自动答题（题库）：已选择单选答案', answer);
+      // 方法3：查找学习通风格的自定义选项
+      const customOptionSelectors = [
+        '.ans-videoquiz-opt',
+        '[class*="videoquiz-opt"]',
+        '[class*="quiz-option"]',
+        '[class*="quiz_option"]',
+        '[class*="option-item"]',
+        '.ans-opt',
+        '.option-item'
+      ];
+
+      for (const sel of customOptionSelectors) {
+        const els = document.querySelectorAll(sel);
+        els.forEach(el => {
+          if (isVisible(el) && !seen.has(el)) {
+            seen.add(el);
+            options.push({ element: el, text: el.textContent.trim(), type: 'custom' });
+          }
+        });
+      }
+
+      // 方法4：查找包含字母 A. B. C. D. 等的选项
+      const labelSelectors = ['li', '.choice', '.choices div'];
+      for (const sel of labelSelectors) {
+        const els = document.querySelectorAll(sel);
+        els.forEach(el => {
+          if (isVisible(el) && !seen.has(el)) {
+            const text = el.textContent.trim();
+            if (/^[A-F][\.、\)]/.test(text) || /^[（(][A-F][）)]/.test(text)) {
+              seen.add(el);
+              options.push({ element: el, text: text, type: 'custom' });
             }
-          } else if (matchedQuestion.type === 'multiple' || checkboxes.length > 0) {
-            for (let i = 0; i < answer.length; i++) {
-              const index = answer.charCodeAt(i) - 65;
-              if (index >= 0 && index < checkboxes.length) {
-                checkboxes[index].click();
+          }
+        });
+      }
+
+      return options;
+    }
+
+    // 执行答题逻辑
+    async answerQuestion(questionInfo) {
+      const { options } = questionInfo;
+      const mode = this.settings.answerMode;
+
+      let selectedIndex = -1;
+      let selectedIndices = []; // 多选题
+
+      // 尝试从题库匹配
+      if (mode === 'bank' && this.quizBank && this.quizBank.questions) {
+        const matched = this.matchQuizBank(questionInfo.text);
+        if (matched) {
+          if (matched.answer && matched.answer.length === 1) {
+            const idx = matched.answer.toUpperCase().charCodeAt(0) - 65;
+            if (idx >= 0 && idx < options.length) {
+              selectedIndex = idx;
+              console.log('[学习通自动刷课] 题库匹配，选择:', String.fromCharCode(65 + idx));
+            }
+          } else if (matched.answer && matched.answer.length > 1) {
+            for (const ch of matched.answer.toUpperCase()) {
+              const idx = ch.charCodeAt(0) - 65;
+              if (idx >= 0 && idx < options.length) {
+                selectedIndices.push(idx);
               }
             }
-            console.log('自动答题（题库）：已选择多选答案', answer);
+            console.log('[学习通自动刷课] 题库匹配（多选），选择:', matched.answer);
           }
-        }, randomDelay(300, 800));
-        return true;
+        }
       }
 
-      console.log('题库未找到匹配答案， fallback 到随机答题');
-      return this.answerRandomly();
-    } catch (error) {
-      console.log('题库答题失败:', error);
-      return this.answerRandomly();
-    }
-  }
-
-  // 模式3：AI答题
-  async answerWithAI(questionText) {
-    if (!this.apiUrl || !this.apiKey) {
-      console.log('AI API 未配置， fallback 到随机答题');
-      return this.answerRandomly();
-    }
-
-    try {
-      // 获取选项文本
-      const options = this.getOptionsText();
-
-      // 构建提示词
-      const prompt = `请根据以下题目和选项，选择正确答案。
-
-题目：${questionText}
-
-选项：${options}
-
-请直接回答正确答案的选项字母（如 A、B、C、D），如果是多选题请给出所有正确选项（如 AB、ACD）。只回答选项，不要其他解释。`;
-
-      // 调用 AI API
-      const response = await fetch(this.apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-3.5-turbo',
-          messages: [
-            {
-              role: 'user',
-              content: prompt
+      // AI 答题模式
+      if (mode === 'ai' && this.settings.apiUrl && this.settings.apiKey && selectedIndex === -1 && selectedIndices.length === 0) {
+        try {
+          const aiAnswer = await this.askAI(questionInfo.text, questionInfo.options);
+          if (aiAnswer) {
+            const aiAnswerUpper = aiAnswer.toUpperCase();
+            if (aiAnswerUpper.length === 1) {
+              const idx = aiAnswerUpper.charCodeAt(0) - 65;
+              if (idx >= 0 && idx < options.length) {
+                selectedIndex = idx;
+                console.log('[学习通自动刷课] AI 选择:', aiAnswerUpper);
+              }
+            } else {
+              for (const ch of aiAnswerUpper) {
+                const idx = ch.charCodeAt(0) - 65;
+                if (idx >= 0 && idx < options.length) {
+                  selectedIndices.push(idx);
+                }
+              }
+              if (selectedIndices.length > 0) {
+                console.log('[学习通自动刷课] AI 选择（多选）:', aiAnswerUpper);
+              }
             }
-          ],
-          temperature: 0.3,
-          max_tokens: 50
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('AI API 请求失败');
+          }
+        } catch (e) {
+          console.log('[学习通自动刷课] AI 调用失败，回退随机');
+        }
       }
 
-      const data = await response.json();
-      const answer = data.choices?.[0]?.message?.content?.trim()?.toUpperCase() || '';
-
-      if (answer) {
-        // 延迟后再选择答案
-        setTimeout(() => {
-          this.selectAnswer(answer);
-          console.log('自动答题（AI）：已选择答案', answer);
-        }, randomDelay(300, 800));
-        return true;
+      // 回退到随机
+      if (selectedIndex === -1 && selectedIndices.length === 0) {
+        selectedIndex = Math.floor(Math.random() * options.length);
+        console.log('[学习通自动刷课] 随机选择:', String.fromCharCode(65 + selectedIndex));
       }
 
-      console.log('AI 未返回有效答案， fallback 到随机答题');
-      return this.answerRandomly();
-    } catch (error) {
-      console.log('AI 答题失败:', error);
-      return this.answerRandomly();
+      // 执行点击
+      setTimeout(() => {
+        if (selectedIndex >= 0) {
+          realClick(options[selectedIndex].element);
+        } else if (selectedIndices.length > 0) {
+          selectedIndices.forEach(i => realClick(options[i].element));
+        }
+
+        // 提交答案
+        setTimeout(() => this.submitAnswer(), randomDelay(800, 1500));
+      }, randomDelay(400, 1000));
     }
-  }
 
-  // 获取选项文本
-  getOptionsText() {
-    const options = [];
-    const optionLabels = ['A', 'B', 'C', 'D', 'E', 'F'];
-
-    // 尝试查找所有选项容器
-    const optionContainers = document.querySelectorAll('li, .option-item, .quiz_option');
-
-    optionContainers.forEach((container, index) => {
-      const text = container.textContent.trim();
-      if (text && text.length < 500) { // 过滤掉太长的文本
-        options.push(`${optionLabels[index]}. ${text}`);
+    // 匹配题库
+    matchQuizBank(questionText) {
+      if (!this.quizBank?.questions) return null;
+      for (const q of this.quizBank.questions) {
+        if (q.keywords && Array.isArray(q.keywords)) {
+          const matched = q.keywords.some(kw => questionText.includes(kw));
+          if (matched) return q;
+        }
       }
-    });
+      return null;
+    }
 
-    return options.join('\n') || '无法获取选项';
-  }
+    // 调用 AI
+    async askAI(questionText, options) {
+      const optionText = options.map((opt, i) => `${String.fromCharCode(65 + i)}. ${opt.text.substring(0, 100)}`).join('\n');
+      const prompt = `题目：${questionText}\n\n选项：\n${optionText}\n\n请只输出正确选项的字母（如 A、B、C、D，多选则如 AB、ACD），不要其他内容。`;
 
-  // 选择答案
-  selectAnswer(answer) {
-    const answerUpper = answer.toUpperCase();
-    const radios = document.querySelectorAll('input[type="radio"]');
-    const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+      try {
+        const response = await fetch(this.settings.apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.settings.apiKey}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-3.5-turbo',
+            messages: [{ role: 'user', content: prompt }],
+            temperature: 0.3,
+            max_tokens: 30
+          })
+        });
 
-    if (answerUpper.length === 1 && radios.length > 0) {
-      // 单选题
-      const index = answerUpper.charCodeAt(0) - 65;
-      if (index >= 0 && index < radios.length) {
-        radios[index].click();
+        if (!response.ok) return null;
+        const data = await response.json();
+        const answer = data.choices?.[0]?.message?.content?.trim() || '';
+        const match = answer.match(/[A-F]+/);
+        return match ? match[0] : null;
+      } catch (e) {
+        return null;
       }
-    } else {
-      // 多选题
-      for (let i = 0; i < answerUpper.length; i++) {
-        const index = answerUpper.charCodeAt(i) - 65;
-        if (index >= 0 && index < checkboxes.length) {
-          checkboxes[index].click();
+    }
+
+    // 提交答案
+    submitAnswer() {
+      const submitSelectors = [
+        '.ans-videoquiz-submit',
+        '[class*="submit"]',
+        'button:has(> span)',
+        '.ans-videoquiz-btn',
+        '.btn-primary'
+      ];
+
+      // 1. 按文字匹配
+      const allButtons = document.querySelectorAll('button, [role="button"], .btn, [class*="btn"]');
+      for (const btn of allButtons) {
+        const text = btn.textContent?.trim() || '';
+        if (isVisible(btn)) {
+          if (/提交|确定|下一题|继续|完成|确认/.test(text)) {
+            realClick(btn);
+            console.log('[学习通自动刷课] 点击提交:', text);
+            return;
+          }
+        }
+      }
+
+      // 2. 按 CSS 类匹配
+      for (const sel of submitSelectors) {
+        const el = document.querySelector(sel);
+        if (el && isVisible(el)) {
+          realClick(el);
+          return;
         }
       }
     }
-  }
 
-  // 自动答题主函数
-  async autoAnswerQuestion() {
-    const questionText = this.getQuestionText();
-    console.log('检测到题目:', questionText);
-
-    let success = false;
-
-    switch (this.answerMode) {
-      case 'random':
-        success = this.answerRandomly();
-        break;
-      case 'bank':
-        success = this.answerFromBank(questionText);
-        break;
-      case 'ai':
-        success = await this.answerWithAI(questionText);
-        break;
-      default:
-        success = this.answerRandomly();
+    // 检查并切换到下一章（当视频播放完成或当前章节已看完）
+    checkAndGoNext() {
+      if (this.currentVideo && !this.currentVideo.ended) return;
+      // 检查进度条是否已满
+      if (this.currentVideo) {
+        if (this.currentVideo.ended) this.goToNextChapter();
+      }
     }
 
-    // 提交答案延迟
-    if (success) {
-      setTimeout(() => {
-        this.submitAnswer();
-      }, randomDelay(800, 1500));
-    }
-  }
+    // 切换到下一章节
+    goToNextChapter() {
+      const nextSelectors = [
+        '.jb_btn.js-next',
+        '.nextChapter',
+        '.next-chapter',
+        '[class*="next-chapter"]',
+        '.nextChapter_btn',
+        '.chapter-next',
+        'a[title*="下一节"]',
+        'a[title*="下一"]',
+        'button[aria-label*="下一节"]',
+        '.prev_next .next',
+        '.chapter-item.active + .chapter-item a',
+        '.ans-job-next'
+      ];
 
-  // 提交答案
-  submitAnswer() {
-    const confirmButtons = document.querySelectorAll('button');
-    for (const btn of confirmButtons) {
-      const text = btn.textContent?.trim();
-      if (text === '确定' || text === '提交' || text === '下一题') {
-        btn.click();
-        console.log('已提交答案');
-        break;
+      // 1. 尝试各种选择器
+      for (const sel of nextSelectors) {
+        const el = document.querySelector(sel);
+        if (el && isVisible(el)) {
+          console.log('[学习通自动刷课] 点击下一章:', sel);
+          realClick(el);
+          this.currentVideo = null;
+          return;
+        }
+      }
+
+      // 2. 按文字匹配
+      const allClickable = document.querySelectorAll('a, button, [role="button"], .btn, div');
+      for (const el of allClickable) {
+        const text = el.textContent?.trim() || '';
+        if (isVisible(el) && /下一节|下一章|下一节|下一题|下一讲|^下$/.test(text) && text.length < 10) {
+          console.log('[学习通自动刷课] 文字匹配下一章:', text);
+          realClick(el);
+          this.currentVideo = null;
+          return;
+        }
+      }
+
+      // 3. 尝试在侧边栏目录中找到当前项并点击下一个
+      try {
+        const chapterItems = document.querySelectorAll('.chapter-item, .catalog-item, [class*="chapter"], [class*="catalog"]');
+        let foundActive = false;
+        for (const item of chapterItems) {
+          if (foundActive && isVisible(item)) {
+            const link = item.querySelector('a, button') || item;
+            realClick(link);
+            this.currentVideo = null;
+            return;
+          }
+          if (item.classList.contains('active') || item.classList.contains('playing')) {
+            foundActive = true;
+          }
+        }
+      } catch (e) {}
+
+      console.log('[学习通自动刷课] 未找到下一章按钮，可能已是最后一节');
+    }
+
+    // 更新设置
+    updateSettings(newSettings) {
+      Object.assign(this.settings, newSettings);
+      console.log('[学习通自动刷课] 设置已更新', this.settings);
+
+      // 立即应用倍速
+      if (this.currentVideo) {
+        try {
+          this.currentVideo.playbackRate = this.settings.playbackSpeed;
+        } catch (e) {}
+      }
+
+      // 如果开启运行，立即检测视频
+      if (this.settings.isRunning) {
+        this.detectAndSetupVideo();
       }
     }
   }
 
-  // 视频播放结束
-  onVideoEnded(video) {
-    console.log('视频播放完成');
+  // 启动
+  let player = null;
+  const startPlayer = () => {
+    if (player) return;
+    player = new AutoPlayer();
+  };
 
-    // 尝试自动切换到下一个视频/章节
-    setTimeout(() => {
-      this.goToNextChapter();
-    }, 1500);
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startPlayer, { once: true });
+  } else {
+    startPlayer();
   }
 
-  // 切换到下一章节
-  goToNextChapter() {
-    // 尝试多种选择器
-    const nextButtonSelectors = [
-      '.jb_btn.js-next',
-      '.nextBtn',
-      '.next_chapter',
-      '.next',
-      'button[data-type="next"]',
-      'a[title="下一节"]',
-      'div[aria-label="下一节"]',
-      '.catalog_next'
-    ];
-
-    for (const selector of nextButtonSelectors) {
-      const nextBtn = document.querySelector(selector);
-      if (nextBtn) {
-        console.log('找到下一章节按钮:', selector);
-        nextBtn.click();
-        // 等待视频加载
-        setTimeout(() => {
-          this.detectAndSetupVideo();
-        }, 3000);
-        break;
+  // 监听 popup 消息
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'UPDATE_SETTINGS') {
+      if (player) {
+        player.updateSettings(message.settings);
       }
-    }
-  }
-
-  // 更新设置
-  updateSettings(settings) {
-    if (settings.isRunning !== undefined) {
-      this.isRunning = settings.isRunning;
-    }
-    if (settings.playbackSpeed !== undefined) {
-      this.playbackSpeed = settings.playbackSpeed;
-    }
-    if (settings.autoAnswer !== undefined) {
-      this.autoAnswer = settings.autoAnswer;
-    }
-    if (settings.answerMode !== undefined) {
-      this.answerMode = settings.answerMode;
-    }
-    if (settings.apiUrl !== undefined) {
-      this.apiUrl = settings.apiUrl;
-    }
-    if (settings.apiKey !== undefined) {
-      this.apiKey = settings.apiKey;
-    }
-
-    // 应用新的倍速设置
-    if (this.currentVideo) {
-      this.currentVideo.playbackRate = this.playbackSpeed;
-    }
-
-    console.log('设置已更新', {
-      isRunning: this.isRunning,
-      playbackSpeed: this.playbackSpeed,
-      autoAnswer: this.autoAnswer,
-      answerMode: this.answerMode
-    });
-  }
-}
-
-// 初始化插件
-let autoPlayer = null;
-
-// 等待DOM加载完成
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    autoPlayer = new XueXiTongAutoPlayer();
-  });
-} else {
-  autoPlayer = new XueXiTongAutoPlayer();
-}
-
-// 监听来自popup的消息
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'UPDATE_SETTINGS') {
-    if (autoPlayer) {
-      autoPlayer.updateSettings(message.settings);
       sendResponse({ success: true });
+      return true;
     }
-  } else if (message.type === 'GET_STATUS') {
-    sendResponse({
-      isRunning: autoPlayer?.isRunning ?? false,
-      playbackSpeed: autoPlayer?.playbackSpeed ?? 1.5,
-      autoAnswer: autoPlayer?.autoAnswer ?? true,
-      answerMode: autoPlayer?.answerMode ?? 'random',
-      apiUrl: autoPlayer?.apiUrl ?? '',
-      apiKey: autoPlayer?.apiKey ?? ''
-    });
-  }
-  return true;
-});
+    if (message.type === 'GET_STATUS') {
+      sendResponse({
+        isRunning: player?.settings.isRunning ?? false,
+        playbackSpeed: player?.settings.playbackSpeed ?? 1.5,
+        hasVideo: !!player?.currentVideo
+      });
+      return true;
+    }
+  });
+})();

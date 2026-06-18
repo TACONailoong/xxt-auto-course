@@ -1,6 +1,5 @@
 // 学习通自动刷课插件 - Popup 脚本
 
-// 状态变量
 let settings = {
   isRunning: false,
   playbackSpeed: 1.5,
@@ -20,44 +19,81 @@ document.addEventListener('DOMContentLoaded', () => {
 function initEventListeners() {
   // 自动刷课开关
   const toggleAuto = document.getElementById('toggleAuto');
-  toggleAuto.addEventListener('click', () => {
-    settings.isRunning = !settings.isRunning;
-    updateUI();
-    saveSettings();
-  });
+  if (toggleAuto) {
+    toggleAuto.addEventListener('click', () => {
+      settings.isRunning = !settings.isRunning;
+      updateUI();
+      saveSettings();
+    });
+  }
 
   // 答题模式按钮
-  document.getElementById('modeRandom').addEventListener('click', () => {
-    settings.answerMode = 'random';
-    updateUI();
-    saveSettings();
-  });
-
-  document.getElementById('modeBank').addEventListener('click', () => {
-    settings.answerMode = 'bank';
-    updateUI();
-    saveSettings();
-  });
-
-  document.getElementById('modeAI').addEventListener('click', () => {
-    settings.answerMode = 'ai';
-    updateUI();
-    saveSettings();
+  const modes = [
+    { id: 'modeRandom', mode: 'random' },
+    { id: 'modeBank', mode: 'bank' },
+    { id: 'modeAI', mode: 'ai' }
+  ];
+  modes.forEach(m => {
+    const el = document.getElementById(m.id);
+    if (el) {
+      el.addEventListener('click', () => {
+        settings.answerMode = m.mode;
+        updateUI();
+        saveSettings();
+      });
+    }
   });
 
   // 倍速滑块
   const speedSlider = document.getElementById('speedSlider');
-  speedSlider.addEventListener('input', updateSpeed);
+  if (speedSlider) {
+    speedSlider.addEventListener('input', () => {
+      settings.playbackSpeed = parseFloat(speedSlider.value);
+      const speedValue = document.getElementById('speedValue');
+      if (speedValue) speedValue.textContent = settings.playbackSpeed + 'x';
+      updatePresetButtons();
+    });
+    speedSlider.addEventListener('change', () => {
+      saveSettings();
+    });
+  }
 
   // 倍速预设按钮
-  document.querySelectorAll('.preset-btn').forEach(btn => {
+  const presets = document.querySelectorAll('.preset-btn');
+  presets.forEach(btn => {
     btn.addEventListener('click', () => {
       const speed = parseFloat(btn.dataset.speed);
-      setSpeed(speed);
+      if (!isNaN(speed)) {
+        settings.playbackSpeed = speed;
+        const s = document.getElementById('speedSlider');
+        if (s) s.value = speed;
+        const v = document.getElementById('speedValue');
+        if (v) v.textContent = speed + 'x';
+        updateUI();
+        saveSettings();
+      }
     });
   });
 
-  // 保存按钮
+  // AI API 配置 - 输入框自动保存
+  const apiUrlInput = document.getElementById('apiUrl');
+  const apiKeyInput = document.getElementById('apiKey');
+  if (apiUrlInput) {
+    apiUrlInput.addEventListener('change', () => {
+      settings.apiUrl = apiUrlInput.value.trim();
+      updateUI();
+      saveSettings();
+    });
+  }
+  if (apiKeyInput) {
+    apiKeyInput.addEventListener('change', () => {
+      settings.apiKey = apiKeyInput.value.trim();
+      updateUI();
+      saveSettings();
+    });
+  }
+
+  // 保存按钮（兜底）
   const saveBtn = document.querySelector('.save-btn');
   if (saveBtn) {
     saveBtn.addEventListener('click', () => {
@@ -70,12 +106,8 @@ function initEventListeners() {
 async function loadSettings() {
   try {
     const result = await chrome.storage.sync.get([
-      'isRunning',
-      'playbackSpeed',
-      'autoAnswer',
-      'answerMode',
-      'apiUrl',
-      'apiKey'
+      'isRunning', 'playbackSpeed', 'autoAnswer',
+      'answerMode', 'apiUrl', 'apiKey'
     ]);
     settings.isRunning = result.isRunning ?? false;
     settings.playbackSpeed = result.playbackSpeed ?? 1.5;
@@ -89,15 +121,16 @@ async function loadSettings() {
   }
 }
 
-// 保存设置到存储
+// 保存设置到存储，并发送到内容脚本
 async function saveSettings() {
   try {
-    // 从输入框获取最新的API配置
+    // 从输入框获取最新的 API 配置
     const apiUrlInput = document.getElementById('apiUrl');
     const apiKeyInput = document.getElementById('apiKey');
     if (apiUrlInput) settings.apiUrl = apiUrlInput.value.trim();
     if (apiKeyInput) settings.apiKey = apiKeyInput.value.trim();
 
+    // 保存到 chrome storage
     await chrome.storage.sync.set({
       isRunning: settings.isRunning,
       playbackSpeed: settings.playbackSpeed,
@@ -107,15 +140,46 @@ async function saveSettings() {
       apiKey: settings.apiKey
     });
 
-    // 向当前标签页的内容脚本发送更新
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) {
-      chrome.tabs.sendMessage(tab.id, {
-        type: 'UPDATE_SETTINGS',
-        settings: settings
-      }).catch(err => {
-        console.log('发送消息失败，可能不在学习通页面');
-      });
+    // 向当前标签页的所有 frame 发送更新消息
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id) {
+        // 使用 tabs.sendMessage 的 frameId 选项发送到主文档和 0 号 frame
+        chrome.tabs.sendMessage(tab.id, {
+          type: 'UPDATE_SETTINGS',
+          settings: settings
+        }).catch(() => {
+          // 失败可能是因为还没加载 content script，忽略即可
+        });
+
+        // 尝试向所有 frame 发送（使用 chrome.scripting 如果有权限）
+        try {
+          if (chrome.scripting) {
+            const frames = await chrome.scripting.executeScript({
+              target: { tabId: tab.id, allFrames: true },
+              func: (settingsObj) => {
+                // 每个 frame 中直接应用设置
+                try {
+                  chrome.storage.sync.set(settingsObj);
+                } catch (e) {}
+                return true;
+              },
+              args: [{
+                isRunning: settings.isRunning,
+                playbackSpeed: settings.playbackSpeed,
+                autoAnswer: settings.autoAnswer,
+                answerMode: settings.answerMode,
+                apiUrl: settings.apiUrl,
+                apiKey: settings.apiKey
+              }]
+            });
+          }
+        } catch (e) {
+          // scripting API 不可用时忽略
+        }
+      }
+    } catch (e) {
+      // 获取 tab 失败时忽略
     }
 
     showNotification('设置已保存！');
@@ -124,23 +188,26 @@ async function saveSettings() {
   }
 }
 
-// 更新UI显示
+// 更新 UI 显示
 function updateUI() {
-  // 更新状态指示器
+  // 状态指示器
   const statusDot = document.getElementById('statusDot');
   const statusText = document.getElementById('statusText');
-
   if (settings.isRunning) {
-    statusDot.classList.add('active');
-    statusText.classList.add('active');
-    statusText.textContent = '插件运行中';
+    if (statusDot) statusDot.classList.add('active');
+    if (statusText) {
+      statusText.classList.add('active');
+      statusText.textContent = '插件运行中';
+    }
   } else {
-    statusDot.classList.remove('active');
-    statusText.classList.remove('active');
-    statusText.textContent = '插件已停止';
+    if (statusDot) statusDot.classList.remove('active');
+    if (statusText) {
+      statusText.classList.remove('active');
+      statusText.textContent = '插件已停止';
+    }
   }
 
-  // 更新开关状态
+  // 开关状态
   const toggleAuto = document.getElementById('toggleAuto');
   if (toggleAuto) {
     if (settings.isRunning) {
@@ -150,13 +217,13 @@ function updateUI() {
     }
   }
 
-  // 更新答题模式按钮
+  // 答题模式按钮高亮
   document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
   const modeId = 'mode' + settings.answerMode.charAt(0).toUpperCase() + settings.answerMode.slice(1);
   const modeBtn = document.getElementById(modeId);
   if (modeBtn) modeBtn.classList.add('active');
 
-  // 更新API配置显示
+  // API 配置显示/隐藏
   const apiConfig = document.getElementById('apiConfig');
   if (apiConfig) {
     if (settings.answerMode === 'ai') {
@@ -166,7 +233,7 @@ function updateUI() {
     }
   }
 
-  // 填充API配置
+  // 填充 API 配置
   const apiUrlInput = document.getElementById('apiUrl');
   const apiKeyInput = document.getElementById('apiKey');
   const apiStatusDot = document.getElementById('apiStatusDot');
@@ -175,7 +242,6 @@ function updateUI() {
   if (apiUrlInput) apiUrlInput.value = settings.apiUrl || '';
   if (apiKeyInput) apiKeyInput.value = settings.apiKey || '';
 
-  // 更新API状态
   if (settings.answerMode === 'ai' && apiStatusDot && apiStatusText) {
     if (settings.apiUrl && settings.apiKey) {
       apiStatusDot.className = 'status-dot-small success';
@@ -189,14 +255,12 @@ function updateUI() {
     }
   }
 
-  // 更新倍速显示
+  // 倍速显示
   const speedSlider = document.getElementById('speedSlider');
   const speedValue = document.getElementById('speedValue');
-
   if (speedSlider) speedSlider.value = settings.playbackSpeed;
   if (speedValue) speedValue.textContent = settings.playbackSpeed + 'x';
 
-  // 更新预设按钮状态
   updatePresetButtons();
 }
 
@@ -204,7 +268,7 @@ function updateUI() {
 function updatePresetButtons() {
   const presetBtns = document.querySelectorAll('.preset-btn');
   presetBtns.forEach(btn => {
-    const btnSpeed = parseFloat(btn.textContent);
+    const btnSpeed = parseFloat(btn.dataset.speed);
     if (btnSpeed === settings.playbackSpeed) {
       btn.classList.add('active');
     } else {
@@ -213,36 +277,11 @@ function updatePresetButtons() {
   });
 }
 
-// 更新倍速值
-function updateSpeed() {
-  const speedSlider = document.getElementById('speedSlider');
-  const speedValue = document.getElementById('speedValue');
-
-  settings.playbackSpeed = parseFloat(speedSlider.value);
-  if (speedValue) speedValue.textContent = settings.playbackSpeed + 'x';
-  updatePresetButtons();
-  saveSettings(); // 滑块变化时自动保存
-}
-
-// 设置固定倍速
-function setSpeed(speed) {
-  settings.playbackSpeed = speed;
-  const speedSlider = document.getElementById('speedSlider');
-  const speedValue = document.getElementById('speedValue');
-
-  if (speedSlider) speedSlider.value = speed;
-  if (speedValue) speedValue.textContent = speed + 'x';
-  updatePresetButtons();
-  saveSettings();
-}
-
 // 显示通知
 function showNotification(message) {
-  // 移除已有的通知
   const existing = document.querySelector('.notification-toast');
   if (existing) existing.remove();
 
-  // 创建通知元素
   const notification = document.createElement('div');
   notification.className = 'notification-toast';
   notification.textContent = message;
@@ -264,11 +303,10 @@ function showNotification(message) {
 
   document.body.appendChild(notification);
 
-  // 2秒后移除通知
   setTimeout(() => {
     notification.style.animation = 'slideDown 0.3s ease reverse';
     setTimeout(() => {
       notification.remove();
     }, 300);
-  }, 2000);
+  }, 1500);
 }

@@ -1,15 +1,24 @@
 {
   "manifest_version": 3,
   "name": "学习通自动刷课助手",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "自动播放学习通视频课程，支持倍速播放和自动答题",
   "permissions": [
     "activeTab",
-    "storage"
+    "storage",
+    "tabs",
+    "scripting"
   ],
   "host_permissions": [
     "*://*.chaoxing.com/*",
-    "*://*.fx361.com/*"
+    "*://*.chaoxing.com/*/*",
+    "*://*.chazhi.com/*",
+    "*://*.px-oa.com/*",
+    "*://*.fx361.com/*",
+    "*://*.xxy.chaoxing.com/*",
+    "*://*.ssdata.chaoxing.com/*",
+    "*://*.mooc.chaoxing.com/*",
+    "*://*.course.gov.cn/*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -23,10 +32,18 @@
     {
       "matches": [
         "*://*.chaoxing.com/*",
-        "*://*.fx361.com/*"
+        "*://*.chazhi.com/*",
+        "*://*.px-oa.com/*",
+        "*://*.fx361.com/*",
+        "*://*.xxy.chaoxing.com/*",
+        "*://*.ssdata.chaoxing.com/*",
+        "*://*.mooc.chaoxing.com/*",
+        "*://*.course.gov.cn/*"
       ],
       "js": ["content.js"],
-      "run_at": "document_end"
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true
     }
   ],
   "background": {
