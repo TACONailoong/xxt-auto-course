@@ -1,10 +1,9 @@
 {
   "manifest_version": 3,
   "name": "学习通自动刷课助手",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "自动播放学习通视频课程，支持倍速播放和自动答题",
   "permissions": [
-    "activeTab",
     "storage"
   ],
   "host_permissions": [
@@ -14,9 +13,9 @@
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "16": "icons/icon16.svg",
-      "48": "icons/icon48.svg",
-      "128": "icons/icon128.svg"
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
     }
   },
   "content_scripts": [
@@ -26,15 +25,23 @@
         "*://*.fx361.com/*"
       ],
       "js": ["content.js"],
-      "run_at": "document_end"
+      "run_at": "document_end",
+      "all_frames": true,
+      "match_about_blank": true
     }
   ],
   "background": {
     "service_worker": "background.js"
   },
   "icons": {
-    "16": "icons/icon16.svg",
-    "48": "icons/icon48.svg",
-    "128": "icons/icon128.svg"
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "xuexitong-auto-player@example.com",
+      "strict_min_version": "115.0"
+    }
   }
 }
