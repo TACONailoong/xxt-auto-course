@@ -39,8 +39,8 @@ export class Game {
     this.entry = new PlanetEntry(this);
     this.net = new Multiplayer(this);
 
-    this.shipPos = new THREE.Vector3(24, 0, 18);
-    this.buildingPos = new THREE.Vector3(72, 0, -40);
+    this.shipPos = new THREE.Vector3(12, 0, 10);
+    this.buildingPos = new THREE.Vector3(48, 0, -28);
     this.markers = [];
 
     this._clock = new THREE.Clock();
@@ -92,11 +92,16 @@ export class Game {
     const sz = this.shipPos.z;
     const sy = this.world.surfaceY(sx, sz);
     this.shipPos.y = sy;
-    this.shipMesh = createStarship({ damaged: true, accent: 0x3ecfb4, engine: 0xe8a832 });
+    this.shipMesh = createStarship({ damaged: true, accent: 0x3ecfb4, engine: 0xe8a832, scale: 1.6 });
     this.shipMesh.position.set(sx, sy, sz);
     this.shipMesh.rotation.y = 0.8;
-    this.shipMesh.rotation.z = 0.15;
+    this.shipMesh.rotation.z = 0.12;
     this.scene.add(this.shipMesh);
+
+    // Visible crash plume light
+    const crashLight = new THREE.PointLight(0xff6020, 1.4, 28);
+    crashLight.position.set(sx, sy + 4, sz);
+    this.scene.add(crashLight);
 
     this.ship = new ShipController(this.shipMesh);
     this.ship.place(sx, sy + 0.5, sz, 0.8);
