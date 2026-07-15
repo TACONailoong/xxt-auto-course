@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VOXBOUND — 方块深空</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/styles/main.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Title Screen -->
+    <div id="title-screen" class="screen active">
+      <div class="title-bg">
+        <canvas id="title-canvas"></canvas>
+        <div class="title-vignette"></div>
+        <div class="title-scanlines"></div>
+      </div>
+      <div class="title-content">
+        <div class="title-brand">
+          <span class="brand-glyph">◆</span>
+          <h1 class="brand-name">VOXBOUND</h1>
+          <p class="brand-sub">方块深空 · 觉醒纪元</p>
+        </div>
+        <p class="title-tagline">在无尽的方块宇宙中苏醒 · 修复飞船 · 探索群星</p>
+        <div class="title-actions">
+          <button id="btn-play" class="btn-primary">
+            <span class="btn-glow"></span>
+            <span class="btn-label">开始觉醒</span>
+          </button>
+          <div class="name-row">
+            <label for="player-name">旅行者代号</label>
+            <input id="player-name" type="text" maxlength="16" placeholder="TRAVELLER" autocomplete="off" />
+          </div>
+        </div>
+        <div class="title-hints">
+          <span>WASD 移动</span>
+          <span>鼠标 视角</span>
+          <span>左键 开采</span>
+          <span>E 交互</span>
+          <span>F 进入飞船</span>
+          <span>C 制作</span>
+          <span>Tab 背包</span>
+        </div>
+      </div>
+      <div class="title-footer">ONLINE · VOXEL SPACE EXPLORATION</div>
+    </div>
+
+    <!-- Loading -->
+    <div id="loading-screen" class="screen">
+      <div class="loading-inner">
+        <div class="loading-brand">VOXBOUND</div>
+        <div class="loading-bar"><div id="loading-fill"></div></div>
+        <div id="loading-text">初始化行星矩阵…</div>
+      </div>
+    </div>
+
+    <!-- Game HUD -->
+    <div id="game-ui" class="screen">
+      <canvas id="game-canvas"></canvas>
+
+      <!-- Crosshair -->
+      <div id="crosshair">
+        <span class="ch-h"></span>
+        <span class="ch-v"></span>
+        <span class="ch-ring"></span>
+      </div>
+
+      <!-- Top mission bar -->
+      <div id="mission-panel">
+        <div class="mission-header">
+          <span class="mission-icon">▣</span>
+          <span id="mission-title">觉醒</span>
+        </div>
+        <div id="mission-objective">—</div>
+        <div id="mission-progress"></div>
+      </div>
+
+      <!-- Hazard / life bars (NMS style) -->
+      <div id="vitals">
+        <div class="vital hazard">
+          <div class="vital-label">防护</div>
+          <div class="vital-bar"><div id="hazard-fill"></div></div>
+        </div>
+        <div class="vital life">
+          <div class="vital-label">生命</div>
+          <div class="vital-bar"><div id="life-fill"></div></div>
+        </div>
+        <div class="vital jetpack">
+          <div class="vital-label">喷气</div>
+          <div class="vital-bar"><div id="jetpack-fill"></div></div>
+        </div>
+      </div>
+
+      <!-- Resource quick bar -->
+      <div id="resource-strip"></div>
+
+      <!-- Interaction prompt -->
+      <div id="interact-prompt" class="hidden">
+        <kbd>E</kbd> <span id="interact-text">交互</span>
+      </div>
+
+      <!-- Scan pulse overlay -->
+      <div id="scan-overlay"></div>
+
+      <!-- Compass -->
+      <div id="compass">
+        <div id="compass-needle"></div>
+        <div id="compass-markers"></div>
+      </div>
+
+      <!-- Ship HUD (when flying) -->
+      <div id="ship-hud" class="hidden">
+        <div class="ship-speed">
+          <span id="speed-value">0</span>
+          <span class="unit">u/s</span>
+        </div>
+        <div class="ship-systems">
+          <div class="sys" id="sys-pulse"><span>脉冲引擎</span><div class="sys-bar"><div id="pulse-fuel"></div></div></div>
+          <div class="sys" id="sys-launch"><span>发射推进</span><div class="sys-bar"><div id="launch-fuel"></div></div></div>
+        </div>
+        <div class="ship-reticule">
+          <div class="ret-corner tl"></div>
+          <div class="ret-corner tr"></div>
+          <div class="ret-corner bl"></div>
+          <div class="ret-corner br"></div>
+        </div>
+        <div id="altitude-readout">ALT <span id="alt-value">0</span></div>
+      </div>
+
+      <!-- Planet entry cinematic overlay -->
+      <div id="entry-overlay" class="hidden">
+        <div class="entry-heat"></div>
+        <div class="entry-blocks"></div>
+        <div class="entry-text">进入大气层</div>
+        <div class="entry-coords" id="entry-coords">—</div>
+      </div>
+
+      <!-- Inventory modal -->
+      <div id="inventory-modal" class="modal hidden">
+        <div class="modal-frame">
+          <div class="modal-title">外骨骼 · 物资舱</div>
+          <div id="inventory-grid"></div>
+          <div class="modal-hint">Tab 关闭 · 点击选中</div>
+        </div>
+      </div>
+
+      <!-- Crafting modal -->
+      <div id="craft-modal" class="modal hidden">
+        <div class="modal-frame craft-frame">
+          <div class="modal-title">物质重组 · 制作台</div>
+          <div id="craft-list"></div>
+          <div class="modal-hint">C 关闭</div>
+        </div>
+      </div>
+
+      <!-- Ship repair panel -->
+      <div id="ship-panel" class="modal hidden">
+        <div class="modal-frame ship-frame">
+          <div class="modal-title">星舰诊断 · 临界维护</div>
+          <div id="ship-status"></div>
+          <div class="modal-hint">Esc 关闭 · 点击修复部件</div>
+        </div>
+      </div>
+
+      <!-- Dialogue / log -->
+      <div id="log-panel">
+        <div id="log-text"></div>
+      </div>
+
+      <!-- Multiplayer presence -->
+      <div id="online-panel">
+        <span class="online-dot"></span>
+        <span id="online-count">1</span> 旅行者在线
+      </div>
+
+      <!-- Hotbar -->
+      <div id="hotbar"></div>
+
+      <!-- Pause / help -->
+      <div id="pause-hint">Esc 释放鼠标 · P 暂停</div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

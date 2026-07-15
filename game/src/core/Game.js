@@ -1,0 +1,589 @@
+import * as THREE from 'three';
+import { PLANETS, BLOCKS } from './constants.js';
+import { Inventory } from '../systems/Inventory.js';
+import { MissionSystem } from '../systems/Mission.js';
+import { PlanetEntry } from '../systems/PlanetEntry.js';
+import { VoxelWorld } from '../world/VoxelWorld.js';
+import { SpaceScene } from '../world/SpaceScene.js';
+import { PlayerController } from '../entities/Player.js';
+import { ShipController } from '../entities/Ship.js';
+import {
+  createStarship,
+  createAbandonedBuilding,
+  createDistressBeacon,
+} from '../models/ShipModel.js';
+import { UIManager } from '../ui/UIManager.js';
+import { Multiplayer } from '../net/Multiplayer.js';
+import { sound } from '../audio/SoundManager.js';
+
+export class Game {
+  constructor() {
+    this.mode = 'planet'; // planet | ship_planet | space | entering
+    this.flags = {
+      scannerRepaired: false,
+      scannedShip: false,
+      nearShip: false,
+      diagnosed: false,
+      beaconRead: false,
+      hermeticTaken: false,
+      unlockedRefiner: false,
+      refinerBuilt: false,
+      canFly: false,
+      spaceTutorial: false,
+      enteredSecondPlanet: false,
+    };
+    this.currentPlanetId = 'awakening';
+    this.inventory = new Inventory();
+    this.ui = new UIManager(this);
+    this.mission = new MissionSystem(this);
+    this.entry = new PlanetEntry(this);
+    this.net = new Multiplayer(this);
+
+    this.shipPos = new THREE.Vector3(24, 0, 18);
+    this.buildingPos = new THREE.Vector3(72, 0, -40);
+    this.markers = [];
+
+    this._clock = new THREE.Clock();
+    this._hazardWarn = 0;
+    this._keyLatch = {};
+    this.spaceGrace = 0;
+    this._mining = false;
+  }
+
+  log(text) {
+    this.ui.log(text);
+  }
+
+  async start(playerName) {
+    await sound.resume();
+    this.playerName = playerName || 'TRAVELLER';
+    this.ui.setLoading(0.1, '构建渲染核心…');
+
+    this.canvas = document.getElementById('game-canvas');
+    this.renderer = new THREE.WebGLRenderer({
+      canvas: this.canvas,
+      antialias: false,
+      powerPreference: 'high-performance',
+    });
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.BasicShadowMap;
+    this.renderer.setClearColor(0x6ab0d0);
+
+    this.scene = new THREE.Scene();
+    this.scene.fog = new THREE.Fog(0x6ab0d0, 40, 140);
+
+    this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 3000);
+
+    this.ui.setLoading(0.3, '生成方块行星…');
+    await this._delay(50);
+
+    this._setupPlanetLights();
+    const planet = PLANETS.find((p) => p.id === this.currentPlanetId);
+    this.world = new VoxelWorld(planet, this.scene);
+    this.world.updateAround(0, 0, 4);
+
+    this.ui.setLoading(0.55, '部署坠毁星舰…');
+    await this._delay(50);
+
+    // Place ship on surface
+    const sx = this.shipPos.x;
+    const sz = this.shipPos.z;
+    const sy = this.world.surfaceY(sx, sz);
+    this.shipPos.y = sy;
+    this.shipMesh = createStarship({ damaged: true, accent: 0x3ecfb4, engine: 0xe8a832 });
+    this.shipMesh.position.set(sx, sy, sz);
+    this.shipMesh.rotation.y = 0.8;
+    this.shipMesh.rotation.z = 0.15;
+    this.scene.add(this.shipMesh);
+
+    this.ship = new ShipController(this.shipMesh);
+    this.ship.place(sx, sy + 0.5, sz, 0.8);
+
+    this.beacon = createDistressBeacon();
+    this.beacon.position.set(sx + 4, sy, sz + 3);
+    this.scene.add(this.beacon);
+
+    const by = this.world.surfaceY(this.buildingPos.x, this.buildingPos.z);
+    this.buildingPos.y = by;
+    this.building = createAbandonedBuilding();
+    this.building.position.set(this.buildingPos.x, by, this.buildingPos.z);
+    this.scene.add(this.building);
+
+    // Waypoint markers (sprites via simple meshes)
+    this.shipMarker = this._makeMarker(0xe8a832);
+    this.shipMarker.position.set(sx, sy + 8, sz);
+    this.shipMarker.visible = false;
+    this.scene.add(this.shipMarker);
+
+    this.buildingMarker = this._makeMarker(0x3ecfb4);
+    this.buildingMarker.position.set(this.buildingPos.x, by + 10, this.buildingPos.z);
+    this.buildingMarker.visible = false;
+    this.scene.add(this.buildingMarker);
+
+    this.player = new PlayerController(this.camera, this.world);
+    this.player.bind(this.canvas);
+    this.player.spawn(2, 2);
+
+    // Guaranteed starter resources near spawn
+    this._seedStarterResources();
+
+    this.space = new SpaceScene(this.scene);
+    this.space.build();
+
+    this.ui.setLoading(0.8, '连接星际网络…');
+    this.net.connect(this.playerName);
+
+    this._bindInput();
+    window.addEventListener('resize', () => this._onResize());
+
+    this.ui.setLoading(1, '苏醒序列完成');
+    await this._delay(400);
+
+    this.ui.showScreen('game-ui');
+    this.log('我在陌生的方块世界醒来，记忆一片空白… 外骨骼提示：采集铁尘修复扫描器。');
+    this.ui.refreshMission();
+
+    // Pointer lock on click
+    this.canvas.addEventListener('click', () => {
+      if (!this.ui.anyModalOpen()) this.canvas.requestPointerLock();
+    });
+    document.addEventListener('pointerlockchange', () => {
+      this.player.pointerLocked = document.pointerLockElement === this.canvas;
+    });
+
+    this._loop();
+  }
+
+  _seedStarterResources() {
+    const spots = [
+      [4, 3, BLOCKS.FERRITE_ROCK],
+      [5, 5, BLOCKS.FERRITE_ROCK],
+      [3, 6, BLOCKS.FERRITE_ROCK],
+      [7, 2, BLOCKS.FERRITE_ROCK],
+      [6, 7, BLOCKS.SODIUM_PLANT],
+      [2, 8, BLOCKS.SODIUM_PLANT],
+      [8, 4, BLOCKS.CARBON_PLANT],
+      [9, 9, BLOCKS.DIHYDROGEN],
+      [1, 5, BLOCKS.DIHYDROGEN],
+    ];
+    for (const [x, z, id] of spots) {
+      const y = this.world.surfaceY(x, z);
+      this.world.setBlock(x, y, z, id);
+    }
+  }
+
+  _setupPlanetLights(fogColor = 0x6ab0d0) {
+    // Remove old lights
+    const toRemove = this.scene.children.filter((c) => c.userData.planetLight);
+    toRemove.forEach((c) => this.scene.remove(c));
+
+    const hemi = new THREE.HemisphereLight(0xb8d8f0, 0x3a5a2a, 0.55);
+    hemi.userData.planetLight = true;
+    this.scene.add(hemi);
+
+    const sun = new THREE.DirectionalLight(0xfff2d0, 1.05);
+    sun.position.set(60, 100, 40);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.camera.near = 1;
+    sun.shadow.camera.far = 200;
+    sun.shadow.camera.left = -60;
+    sun.shadow.camera.right = 60;
+    sun.shadow.camera.top = 60;
+    sun.shadow.camera.bottom = -60;
+    sun.userData.planetLight = true;
+    this.scene.add(sun);
+
+    const fill = new THREE.AmbientLight(0x405060, 0.35);
+    fill.userData.planetLight = true;
+    this.scene.add(fill);
+
+    this.scene.fog = new THREE.Fog(fogColor, 40, 140);
+    this.renderer.setClearColor(fogColor);
+
+    // Blocky cloud puffs
+    if (!this._clouds) {
+      this._clouds = new THREE.Group();
+      this._clouds.userData.planetLight = true;
+      for (let i = 0; i < 18; i++) {
+        const cloud = new THREE.Group();
+        const mat = new THREE.MeshLambertMaterial({
+          color: 0xe8f0f8,
+          transparent: true,
+          opacity: 0.55,
+          flatShading: true,
+        });
+        for (let j = 0; j < 4; j++) {
+          const b = new THREE.Mesh(new THREE.BoxGeometry(4 + Math.random() * 4, 2, 3 + Math.random() * 3), mat);
+          b.position.set(j * 3 - 4, Math.random() * 1.5, (Math.random() - 0.5) * 4);
+          cloud.add(b);
+        }
+        cloud.position.set((Math.random() - 0.5) * 160, 45 + Math.random() * 20, (Math.random() - 0.5) * 160);
+        this._clouds.add(cloud);
+      }
+      this.scene.add(this._clouds);
+    } else {
+      this._clouds.visible = true;
+      this.scene.add(this._clouds);
+    }
+  }
+
+  _setupSpaceLights() {
+    const toRemove = this.scene.children.filter((c) => c.userData.planetLight);
+    toRemove.forEach((c) => this.scene.remove(c));
+    if (this._clouds) this._clouds.visible = false;
+    const amb = new THREE.AmbientLight(0x304050, 0.4);
+    amb.userData.planetLight = true;
+    this.scene.add(amb);
+    this.scene.fog = null;
+    this.renderer.setClearColor(0x02060c);
+  }
+
+  _makeMarker(color) {
+    const g = new THREE.Group();
+    const diamond = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.8, 0),
+      new THREE.MeshBasicMaterial({ color })
+    );
+    g.add(diamond);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(1.2, 1.5, 4),
+      new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true, opacity: 0.7 })
+    );
+    ring.rotation.x = Math.PI / 2;
+    g.add(ring);
+    g.userData.diamond = diamond;
+    return g;
+  }
+
+  _bindInput() {
+    window.addEventListener('keydown', (e) => {
+      if (this._keyLatch[e.code]) return;
+      this._keyLatch[e.code] = true;
+
+      if (e.code === 'Tab') {
+        e.preventDefault();
+        this.ui.toggleInventory();
+        if (this.ui.anyModalOpen()) document.exitPointerLock();
+      }
+      if (e.code === 'KeyC') {
+        this.ui.toggleCraft();
+        if (this.ui.anyModalOpen()) document.exitPointerLock();
+      }
+      if (e.code === 'Escape') {
+        this.ui.closeModals();
+      }
+      if (e.code === 'KeyR') this._doScan();
+      if (e.code === 'KeyE') this._doInteract();
+      if (e.code === 'KeyF') this._toggleShip();
+      if (e.code === 'KeyQ') {
+        // Use sodium to recharge hazard
+        if (this.inventory.has('sodium', 5)) {
+          this.inventory.remove('sodium', 5);
+          this.player.rechargeHazard(40);
+          sound.collect();
+          this.log('防护系统已充能（钠）。');
+        } else {
+          this.log('需要钠×5 充能防护。');
+        }
+      }
+    });
+    window.addEventListener('keyup', (e) => {
+      this._keyLatch[e.code] = false;
+    });
+
+    this._mining = false;
+    this.canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 0) this._mining = true;
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 0) this._mining = false;
+    });
+  }
+
+  _doScan() {
+    if (!this.flags.scannerRepaired && this.inventory.count('ferrite_dust') < 75) {
+      this.log('扫描器损坏。需要铁尘×75。');
+      return;
+    }
+    if (!this.flags.scannerRepaired && this.inventory.count('ferrite_dust') >= 75) {
+      this.inventory.remove('ferrite_dust', 75);
+      this.flags.scannerRepaired = true;
+    }
+    sound.scan();
+    this.ui.showScan();
+    this.flags.scannedShip = true;
+    this.shipMarker.visible = true;
+    this.log('扫描完成：检测到坠毁星舰信号。');
+    if (this.flags.beaconRead && !this.flags.hermeticTaken) {
+      this.buildingMarker.visible = true;
+      this.log('废弃建筑坐标已标定。');
+    }
+  }
+
+  _doInteract() {
+    if (this.mode !== 'planet') return;
+    const pos = this.player.position;
+
+    // Beacon
+    if (this.beacon && pos.distanceTo(this.beacon.position) < 4) {
+      this.flags.beaconRead = true;
+      this.buildingMarker.visible = true;
+      this.log('求救信标：行星图已解码。前往废弃建筑寻找密封环。风暴预警…');
+      sound.uiClick();
+      return;
+    }
+
+    // Building terminal
+    if (this.building && pos.distanceTo(this.building.position) < 5) {
+      if (!this.flags.hermeticTaken) {
+        this.flags.hermeticTaken = true;
+        this.inventory.add('hermetic_seal', 1);
+        this.buildingMarker.visible = false;
+        sound.craft();
+        this.log('获得密封环！返回星舰安装。');
+      } else {
+        this.log('终端已空。');
+      }
+      return;
+    }
+
+    // Ship interact when near
+    if (pos.distanceTo(this.ship.position) < 5) {
+      this.flags.nearShip = true;
+      if (!this.flags.diagnosed) {
+        this.flags.diagnosed = true;
+        this.ui.toggleShipPanel(true);
+        document.exitPointerLock();
+        this.log('诊断：脉冲引擎与发射推进器离线。');
+      } else {
+        this.ui.toggleShipPanel(true);
+        document.exitPointerLock();
+      }
+    }
+  }
+
+  _toggleShip() {
+    if (this.mode === 'planet') {
+      if (this.player.position.distanceTo(this.ship.position) > 6) {
+        this.log('距离星舰过远。');
+        return;
+      }
+      this.flags.nearShip = true;
+      if (!this.flags.diagnosed) {
+        this.flags.diagnosed = true;
+        this.log('进入驾驶舱。系统离线 — 打开诊断面板。');
+        this.ui.toggleShipPanel(true);
+        document.exitPointerLock();
+        return;
+      }
+      if (!this.ship.repaired) {
+        this.ui.toggleShipPanel(true);
+        document.exitPointerLock();
+        return;
+      }
+      // Board ship for flight
+      this.mode = 'ship_planet';
+      this.shipMesh.rotation.z = 0;
+      sound.shipEnter();
+      sound.liftoff();
+      this.log('星舰就绪。WASD 飞行 · Space 升空 · 高度 120 进入太空。');
+      this.ship.position.copy(this.shipMesh.position);
+      this.ship.position.y += 2;
+    } else if (this.mode === 'ship_planet') {
+      // Land / exit
+      const sy = this.world.surfaceY(this.ship.position.x, this.ship.position.z);
+      if (this.ship.position.y > sy + 8) {
+        this.log('高度过高，无法降落。降低高度后再试。');
+        return;
+      }
+      this.mode = 'planet';
+      this.ship.position.y = sy + 0.5;
+      this.shipMesh.position.copy(this.ship.position);
+      this.player.position.set(this.ship.position.x + 3, sy + 2, this.ship.position.z);
+      this.player.velocity.set(0, 0, 0);
+      sound.setThruster(false);
+      sound.shipEnter();
+      this.log('已离舰。');
+    } else if (this.mode === 'space') {
+      this.log('在太空中选择行星俯冲进入大气层。');
+    }
+  }
+
+  enterSpace() {
+    this.mode = 'space';
+    this.spaceGrace = 4; // seconds before atmosphere entry can trigger
+    this._setupSpaceLights();
+    if (this.world) {
+      this.world.group.visible = false;
+    }
+    this.beacon.visible = false;
+    this.building.visible = false;
+    this.shipMarker.visible = false;
+    this.buildingMarker.visible = false;
+    this.space.setActive(true);
+
+    const home = this.space.planets[0];
+    this.ship.position.set(0, home.def.radius + 50, home.def.radius + 60);
+    this.ship.inSpace = true;
+    this.ship.speed = 50;
+    this.shipMesh.rotation.z = 0;
+    sound.liftoff();
+    this.log('冲出大气层。深空就绪。飞向邻近行星，接近后自动进入大气。');
+  }
+
+  landOnPlanet(planetDef, fromSpace = false) {
+    this.currentPlanetId = planetDef.id;
+    if (fromSpace && planetDef.id !== 'awakening') {
+      this.flags.enteredSecondPlanet = true;
+    }
+
+    this.space.setActive(false);
+    this._setupPlanetLights(planetDef.atmosphere);
+
+    // Rebuild voxel world for this planet
+    if (this.world) this.world.dispose();
+    this.world = new VoxelWorld(planetDef, this.scene);
+    this.world.updateAround(0, 0, 4);
+    this.player.world = this.world;
+
+    // Place ship in air then allow landing
+    const sy = this.world.surfaceY(0, 0);
+    this.ship.endEntry(sy);
+    this.shipMesh.position.copy(this.ship.position);
+
+    // Show/hide story props only on awakening
+    const home = planetDef.id === 'awakening';
+    this.beacon.visible = home;
+    this.building.visible = home;
+
+    this.mode = 'ship_planet';
+    this.log(`降落于 ${planetDef.name}。按 F 在低空离舰探索。`);
+  }
+
+  _updateMarkers(dt) {
+    for (const m of [this.shipMarker, this.buildingMarker]) {
+      if (!m || !m.visible) continue;
+      m.userData.diamond.rotation.y += dt * 2;
+      m.position.y += Math.sin(performance.now() * 0.003) * 0.01;
+    }
+    // Near ship check
+    if (this.mode === 'planet' && this.player.position.distanceTo(this.ship.position) < 10) {
+      this.flags.nearShip = true;
+    }
+  }
+
+  _updateInteractPrompt() {
+    if (this.mode !== 'planet') {
+      this.ui.setInteract(null);
+      return;
+    }
+    const pos = this.player.position;
+    if (pos.distanceTo(this.ship.position) < 5) {
+      this.ui.setInteract(this.ship.repaired ? '进入星舰' : '星舰诊断');
+    } else if (this.beacon && pos.distanceTo(this.beacon.position) < 4) {
+      this.ui.setInteract('调查求救信标');
+    } else if (this.building && pos.distanceTo(this.building.position) < 5) {
+      this.ui.setInteract(this.flags.hermeticTaken ? '检查终端' : '取得密封环');
+    } else {
+      this.ui.setInteract(null);
+    }
+  }
+
+  _updateCompass() {
+    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    let yaw = this.mode === 'planet' ? this.player.yaw : this.ship.yaw;
+    let idx = Math.round(((-yaw + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 4)) % 8;
+    document.getElementById('compass-markers').textContent = dirs[idx];
+  }
+
+  _loop() {
+    requestAnimationFrame(() => this._loop());
+    const dt = Math.min(0.05, this._clock.getDelta());
+
+    if (this.mode === 'planet') {
+      this.player.update(dt, this.inventory);
+      this.world.updateAround(this.player.position.x, this.player.position.z, 3);
+      if (this._mining && this.player.pointerLocked) {
+        this.player.tryMine(this.inventory);
+      }
+    } else if (this.mode === 'ship_planet') {
+      this.ship.syncKeys(this.player.keys);
+      // Mouse look drives ship orientation
+      this.ship.yaw = this.player.yaw;
+      this.ship.pitch = this.player.pitch;
+      const transition = this.ship.update(dt, 'ship_planet', this.camera);
+      // Write back yaw if A/D adjusted it
+      this.player.yaw = this.ship.yaw;
+      this.player.pitch = this.ship.pitch;
+      this.ship.updateCamera(this.camera);
+      this.player.position.copy(this.ship.position);
+      if (this.world) this.world.updateAround(this.ship.position.x, this.ship.position.z, 3);
+      if (transition === 'to_space' || this.ship.position.y > 120) {
+        this.enterSpace();
+      }
+    } else if (this.mode === 'space') {
+      if (this.spaceGrace > 0) this.spaceGrace -= dt;
+      this.ship.syncKeys(this.player.keys);
+      this.ship.yaw = this.player.yaw;
+      this.ship.pitch = this.player.pitch;
+      this.ship.update(dt, 'space', this.camera);
+      this.player.yaw = this.ship.yaw;
+      this.player.pitch = this.ship.pitch;
+      this.ship.updateCamera(this.camera);
+      this.space.update(dt);
+
+      if (this.spaceGrace <= 0) {
+        const approach = this.space.findApproach(this.ship.position, 30);
+        if (approach) {
+          const dist = this.ship.position.distanceTo(approach.mesh.position) - approach.def.radius;
+          if (dist < 18) {
+            this.entry.start(approach);
+          }
+        }
+      }
+    } else if (this.mode === 'entering') {
+      this.ship.syncKeys(this.player.keys);
+      this.ship.update(dt, 'entering', this.camera);
+      this.ship.updateCamera(this.camera);
+      this.entry.update(dt);
+      this.space.update(dt);
+    }
+
+    // Beacon pulse
+    if (this.beacon && this.beacon.userData.lamp) {
+      const pulse = 0.5 + Math.sin(performance.now() * 0.008) * 0.5;
+      this.beacon.userData.lamp.material.emissiveIntensity = pulse;
+    }
+
+    // Hazard warning
+    if (this.player.hazard < 25) {
+      this._hazardWarn += dt;
+      if (this._hazardWarn > 3) {
+        this._hazardWarn = 0;
+        sound.hazardWarning();
+      }
+    }
+
+    this._updateMarkers(dt);
+    this._updateInteractPrompt();
+    this._updateCompass();
+    this.mission.update();
+    this.ui.update(dt);
+    this.net.update(dt);
+
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  _onResize() {
+    this.camera.aspect = window.innerWidth / window.innerHeight;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  _delay(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+}
