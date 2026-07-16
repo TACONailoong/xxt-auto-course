@@ -22,6 +22,7 @@ const XXT_HUD_LAYOUT_KEY = 'xxtHudLayout';
 const XXT_STATS_KEY = 'xxtSessionStats';
 const XXT_MORE_OPEN_KEY = 'xxtMoreOpen';
 const XXT_FINGERPRINT_LIMIT = 80;
+const XXT_RELOAD_HINT_KEY = 'xxtReloadHint';
 
 if (typeof globalThis !== 'undefined') {
   globalThis.XXT_DEFAULT_SETTINGS = XXT_DEFAULT_SETTINGS;
@@ -32,4 +33,5 @@ if (typeof globalThis !== 'undefined') {
   globalThis.XXT_STATS_KEY = XXT_STATS_KEY;
   globalThis.XXT_MORE_OPEN_KEY = XXT_MORE_OPEN_KEY;
   globalThis.XXT_FINGERPRINT_LIMIT = XXT_FINGERPRINT_LIMIT;
+  globalThis.XXT_RELOAD_HINT_KEY = XXT_RELOAD_HINT_KEY;
 }

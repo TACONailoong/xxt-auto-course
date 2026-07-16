@@ -43,6 +43,12 @@
   const fingerprintText = DOM.fingerprintText || (t => normalizeText(t).slice(0, 160));
   const shouldStopByLimits = DOM.shouldStopByLimits || (() => ({ stop: false, reason: '' }));
   const trimSet = DOM.trimSet || ((setLike) => new Set(setLike || []));
+  const isManualVerificationText =
+    DOM.isManualVerificationText ||
+    (text => /人脸|刷脸|安全验证|身份验证|人脸识别/.test(String(text || '')));
+  const isProtectedStatusPhase =
+    DOM.isProtectedStatusPhase ||
+    (phase => ['limit', 'done', 'paused', 'verify', 'dead'].includes(String(phase || '')));
   const FINGERPRINT_LIMIT =
     (typeof XXT_FINGERPRINT_LIMIT !== 'undefined' && XXT_FINGERPRINT_LIMIT) || 80;
 
@@ -54,6 +60,8 @@
   const HUD_LAYOUT_KEY =
     (typeof XXT_HUD_LAYOUT_KEY !== 'undefined' && XXT_HUD_LAYOUT_KEY) || 'xxtHudLayout';
   const STATS_KEY = (typeof XXT_STATS_KEY !== 'undefined' && XXT_STATS_KEY) || 'xxtSessionStats';
+  const RELOAD_HINT_KEY =
+    (typeof XXT_RELOAD_HINT_KEY !== 'undefined' && XXT_RELOAD_HINT_KEY) || 'xxtReloadHint';
 
   class XueXiTongAutoPlayer {
     constructor() {
@@ -85,6 +93,9 @@
       this.lastActivePersistAt = 0;
       this.recoverLevel = 0;
       this.lastRecoverAt = 0;
+      this.lastGuardAt = 0;
+      this.lastBgHintAt = 0;
+      this.lastVerifyCheckAt = 0;
       this.status = {
         phase: 'idle',
         detail: '等待课程页面…',
@@ -105,6 +116,7 @@
         await this.loadStats();
       }
       this.watchSettingsChanges();
+      this.bindLifecycle();
       this.startObserver();
       this.tickTimer = setInterval(() => this.tick(), 1500);
       if (IS_TOP) {
@@ -112,12 +124,26 @@
         this.refreshChapterTitle();
         this.publishStatus(true);
         this.pushLog('插件已在本页启动');
+        this.checkReloadHint();
       }
       this.log('插件已启动', { frame: IS_TOP ? 'top' : 'iframe', ...this.settings });
     }
 
     log(...args) {
       console.log('[学习通助手]', ...args);
+    }
+
+    handleRuntimeError(error, context = '') {
+      const msg = (error && error.message) || String(error || '');
+      if (
+        !isExtensionAlive() ||
+        /Extension context invalidated|runtime unavailable/i.test(msg)
+      ) {
+        this.markDead(msg || context);
+        return true;
+      }
+      this.log('可恢复错误', context, msg);
+      return false;
     }
 
     markDead(reason) {
@@ -130,6 +156,15 @@
       this.tickTimer = null;
       this.scanTimer = null;
       this.observer = null;
+      if (IS_TOP) {
+        this.status.phase = 'dead';
+        this.status.detail = '扩展已失效，请刷新本页';
+        try {
+          this.ensureHud();
+          this.updateHud();
+          this.showToast('扩展已失效，请刷新课程页');
+        } catch (_) {}
+      }
     }
 
     ensureAlive() {
@@ -141,13 +176,43 @@
       return true;
     }
 
+    bindLifecycle() {
+      document.addEventListener('visibilitychange', () => {
+        if (this.dead) return;
+        if (document.visibilityState === 'visible') {
+          this.tick();
+          return;
+        }
+        if (IS_TOP && this.settings.isRunning && Date.now() - this.lastBgHintAt > 60000) {
+          this.lastBgHintAt = Date.now();
+          this.showToast('页面进入后台，播放可能被浏览器限速');
+        }
+      });
+      window.addEventListener('focus', () => {
+        if (!this.dead) this.tick();
+      });
+    }
+
+    async checkReloadHint() {
+      if (!IS_TOP || !this.ensureAlive()) return;
+      try {
+        const result = await chrome.storage.local.get(RELOAD_HINT_KEY);
+        if (!result[RELOAD_HINT_KEY]) return;
+        await chrome.storage.local.remove(RELOAD_HINT_KEY);
+        this.showToast('扩展已更新，建议刷新课程页');
+        this.pushLog('扩展已更新，建议刷新课程页以加载最新脚本');
+      } catch (error) {
+        this.handleRuntimeError(error, 'checkReloadHint');
+      }
+    }
+
     async loadSettings() {
       if (!this.ensureAlive()) return;
       try {
         const stored = await chrome.storage.sync.get(DEFAULT_SETTINGS);
         this.settings = { ...DEFAULT_SETTINGS, ...stored };
       } catch (error) {
-        this.markDead(error && error.message);
+        this.handleRuntimeError(error, 'loadSettings');
       }
     }
 
@@ -182,7 +247,13 @@
           if (area === 'local' && IS_TOP) {
             if (changes[STATS_KEY]) {
               const next = changes[STATS_KEY].newValue;
-              this.stats = next && typeof next === 'object' ? next : createEmptyStats();
+              const merged =
+                next && typeof next === 'object' ? { ...next } : createEmptyStats();
+              merged.activeMs = Math.max(
+                Number(merged.activeMs) || 0,
+                Number(this.stats.activeMs) || 0
+              );
+              this.stats = merged;
               this.updateHud();
               this.publishStatus(true);
             }
@@ -197,7 +268,7 @@
           }
         });
       } catch (error) {
-        this.markDead(error && error.message);
+        this.handleRuntimeError(error);
       }
     }
 
@@ -210,8 +281,8 @@
         if (video.paused && !video.ended) this.tryPlay(video);
       } else if (!video.paused) {
         video.pause();
-        // 限流/学完暂停时保留原因，勿覆盖
-        if (!['limit', 'done'].includes(this.status.phase)) {
+        // 限流/学完/验证暂停时保留原因，勿覆盖
+        if (!isProtectedStatusPhase(this.status.phase)) {
           this.setStatus('paused', '已暂停自动刷课');
         }
       }
@@ -273,6 +344,21 @@
 
     applyFrameStatus(payload, force = false) {
       if (!IS_TOP || !payload || typeof payload !== 'object') return;
+
+      // 已暂停/限流/验证时只同步进度，避免 iframe 覆盖暂停原因
+      if (!this.settings.isRunning || isProtectedStatusPhase(this.status.phase)) {
+        if (typeof payload.progress === 'number') {
+          this.status.progress = payload.progress;
+        }
+        if (typeof payload.hasVideo === 'boolean') {
+          this.status.hasVideo = payload.hasVideo;
+        }
+        this.status.updatedAt = Date.now();
+        this.updateHudProgressOnly();
+        this.publishStatus(false);
+        return;
+      }
+
       const prevDetail = this.status.detail;
       const nextDetail =
         typeof payload.detail === 'string' && payload.detail
@@ -313,7 +399,9 @@
         this.lastActiveTickAt = now;
         return;
       }
-      const delta = Math.min(Math.max(0, now - this.lastActiveTickAt), 4000);
+      // 后台标签 interval 会被拉长，放宽单次累计上限以免漏计
+      const maxDelta = document.visibilityState === 'hidden' ? 30000 : 4000;
+      const delta = Math.min(Math.max(0, now - this.lastActiveTickAt), maxDelta);
       this.lastActiveTickAt = now;
       this.stats.activeMs = (Number(this.stats.activeMs) || 0) + delta;
       if (now - this.lastActivePersistAt >= 5000) {
@@ -347,7 +435,7 @@
           })
           .catch(() => {});
       } catch (error) {
-        this.markDead(error && error.message);
+        this.handleRuntimeError(error);
       }
     }
 
@@ -359,7 +447,7 @@
         list.unshift({ t: Date.now(), message: String(message) });
         await chrome.storage.local.set({ [LOG_KEY]: list.slice(0, LOG_LIMIT) });
       } catch (error) {
-        this.markDead(error && error.message);
+        this.handleRuntimeError(error);
       }
     }
 
@@ -456,7 +544,7 @@
       try {
         await chrome.storage.local.set({ [HUD_LAYOUT_KEY]: this.hudLayout });
       } catch (error) {
-        this.markDead(error && error.message);
+        this.handleRuntimeError(error);
       }
     }
 
@@ -482,7 +570,7 @@
       try {
         await chrome.storage.local.set({ [STATS_KEY]: this.stats });
       } catch (error) {
-        this.markDead(error && error.message);
+        this.handleRuntimeError(error);
       }
     }
 
@@ -492,7 +580,10 @@
         const result = await chrome.storage.local.get(STATS_KEY);
         const stats = result[STATS_KEY] || createEmptyStats();
         stats[key] = (Number(stats[key]) || 0) + 1;
-        stats.activeMs = Number(stats.activeMs) || Number(this.stats.activeMs) || 0;
+        stats.activeMs = Math.max(
+          Number(stats.activeMs) || 0,
+          Number(this.stats.activeMs) || 0
+        );
         this.stats = stats;
         await chrome.storage.local.set({ [STATS_KEY]: stats });
         if (IS_TOP) {
@@ -503,20 +594,20 @@
           window.parent.postMessage({ type: 'XXT_STATS_UPDATED' }, '*');
         }
       } catch (error) {
-        this.markDead(error && error.message);
+        this.handleRuntimeError(error);
       }
     }
 
-    async pauseForReason(reason) {
+    async pauseForReason(reason, phase = 'limit') {
       if (!this.settings.isRunning || this.limitPausePending || !this.ensureAlive()) return;
       this.limitPausePending = true;
       try {
-        this.setStatus('limit', reason);
+        this.setStatus(phase, reason);
         this.showToast(reason);
         this.pushLog(reason);
         await chrome.storage.sync.set({ isRunning: false });
       } catch (error) {
-        this.markDead(error && error.message);
+        this.handleRuntimeError(error, 'pauseForReason');
       } finally {
         setTimeout(() => {
           this.limitPausePending = false;
@@ -537,7 +628,7 @@
     async enforceCompletionStop() {
       if (!IS_TOP || !this.settings.isRunning || !this.settings.stopWhenDone) return;
       if (this.hadRemaining && this.status.remaining === 0) {
-        await this.pauseForReason('目录已全部完成，已自动暂停');
+        await this.pauseForReason('目录已全部完成，已自动暂停', 'done');
       }
     }
 
@@ -635,7 +726,7 @@
         try {
           await chrome.storage.sync.set({ isRunning: !this.settings.isRunning });
         } catch (error) {
-          this.markDead(error && error.message);
+          this.handleRuntimeError(error);
         }
       });
 
@@ -645,7 +736,7 @@
         try {
           await chrome.storage.sync.set({ showHud: false });
         } catch (error) {
-          this.markDead(error && error.message);
+          this.handleRuntimeError(error);
         }
       });
 
@@ -767,7 +858,7 @@
       try {
         await chrome.storage.sync.set({ playbackSpeed: next });
       } catch (error) {
-        this.markDead(error && error.message);
+        this.handleRuntimeError(error);
       }
     }
 
@@ -820,13 +911,16 @@
           : '';
       stats.textContent = `${formatSessionStats(this.stats)}${remainText}`;
 
-      if (!this.settings.isRunning) {
+      if (!this.settings.isRunning || this.status.phase === 'dead') {
         const keepReason =
-          ['limit', 'done', 'paused'].includes(this.status.phase) && this.status.detail;
+          isProtectedStatusPhase(this.status.phase) && this.status.detail;
         detail.textContent = keepReason || '已停止';
-        meta.textContent = keepReason
-          ? '可点“开始”继续，或重置会话统计后继续'
-          : '点击“开始”或在扩展弹窗中开启';
+        meta.textContent =
+          this.status.phase === 'dead'
+            ? '请刷新课程页后重新启用'
+            : keepReason
+              ? '可点“开始”继续，或重置会话统计后继续'
+              : '点击“开始”或在扩展弹窗中开启';
         this.hud.style.opacity = '0.75';
         return;
       }
@@ -930,6 +1024,14 @@
       video.addEventListener('timeupdate', () => {
         if (!video.duration) return;
         this.setProgress(video.currentTime / video.duration);
+        // 后台标签 interval 可能被限速，用媒体事件驱动恢复检查
+        if (this.settings.isRunning) {
+          const now = Date.now();
+          if (now - this.lastGuardAt >= 2000) {
+            this.lastGuardAt = now;
+            this.guardVideo(video);
+          }
+        }
       });
 
       video.addEventListener('ended', () => {
@@ -1044,6 +1146,8 @@
         return;
       }
 
+      if (this.detectManualVerification()) return;
+
       if (IS_TOP) {
         this.enforceLimits();
         this.enforceCompletionStop();
@@ -1061,6 +1165,38 @@
       if (this.settings.autoAnswer) this.checkAndAnswerQuestion();
       this.handleDocumentReading();
       this.dismissJobFinishTip();
+    }
+
+    detectManualVerification() {
+      if (!this.settings.isRunning) return false;
+      const now = Date.now();
+      if (now - this.lastVerifyCheckAt < 2000) return false;
+      this.lastVerifyCheckAt = now;
+
+      const candidates = document.querySelectorAll(
+        [
+          '.maskDiv',
+          '.popDiv',
+          '.dialog',
+          '.layui-layer',
+          '.layui-layer-dialog',
+          '.ant-modal',
+          '.vjs-modal-dialog',
+          '[role="dialog"]',
+          '[class*="face"]',
+          '[class*="verify"]'
+        ].join(',')
+      );
+
+      for (const el of candidates) {
+        if (!isVisible(el)) continue;
+        const text = el.textContent || '';
+        if (!text || text.length > 2000) continue;
+        if (!isManualVerificationText(text)) continue;
+        this.pauseForReason('检测到需要人工验证，已自动暂停', 'verify');
+        return true;
+      }
+      return false;
     }
 
     guardVideo(video) {
@@ -1442,7 +1578,7 @@
       this.setStatus('done', '未找到下一节，可能已全部完成');
       this.showToast('没有更多未完成小节了');
       if (this.settings.stopWhenDone) {
-        this.pauseForReason('目录已全部完成，已自动暂停');
+        this.pauseForReason('目录已全部完成，已自动暂停', 'done');
       }
       return false;
     }

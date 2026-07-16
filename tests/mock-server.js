@@ -64,6 +64,13 @@ const topPage = `<!DOCTYPE html>
     </div>
   </div>
 
+  <div class="maskDiv" id="faceMask" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);">
+    <div role="dialog" style="margin:20vh auto;width:260px;background:#fff;padding:20px;text-align:center;">
+      <p>请完成人脸识别后继续学习</p>
+      <button id="faceOk">我知道了</button>
+    </div>
+  </div>
+
   <iframe src="/frame" width="400" height="300"></iframe>
   <script>
     document.getElementById('videoTab').onclick = () => {
@@ -77,6 +84,9 @@ const topPage = `<!DOCTYPE html>
     };
     window.__showIdle = () => {
       document.getElementById('idleMask').style.display = 'block';
+    };
+    window.__showFace = () => {
+      document.getElementById('faceMask').style.display = 'block';
     };
     window.__catalogClicked = null;
     document.querySelectorAll('#coursetree .posCatalog_name').forEach(el => {

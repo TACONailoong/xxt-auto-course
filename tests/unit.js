@@ -94,12 +94,24 @@ test('formatDuration', () => {
 
 test('formatSessionStats', () => {
   const text = DOM.formatSessionStats(
-    { nextCount: 2, answerCount: 1, startedAt: Date.now() - 5000 },
+    { nextCount: 2, answerCount: 1, startedAt: Date.now() - 600000, activeMs: 5000 },
     Date.now()
   );
   assert.ok(text.includes('切章 2'));
   assert.ok(text.includes('答题 1'));
-  assert.ok(text.includes('秒') || text.includes('分'));
+  assert.ok(text.includes('5秒'), text);
+});
+
+test('isManualVerificationText', () => {
+  assert.strictEqual(DOM.isManualVerificationText('请完成人脸识别'), true);
+  assert.strictEqual(DOM.isManualVerificationText('安全验证'), true);
+  assert.strictEqual(DOM.isManualVerificationText('继续学习'), false);
+});
+
+test('isProtectedStatusPhase', () => {
+  assert.strictEqual(DOM.isProtectedStatusPhase('limit'), true);
+  assert.strictEqual(DOM.isProtectedStatusPhase('verify'), true);
+  assert.strictEqual(DOM.isProtectedStatusPhase('playing'), false);
 });
 
 test('summarizeOptions', () => {

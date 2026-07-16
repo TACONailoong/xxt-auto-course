@@ -231,7 +231,7 @@ function sleep(ms) {
       check('弹窗提供会话限流输入', maxChaptersExists && maxMinutesExists);
 
       const footerText = await popup.$eval('.footer', el => el.textContent);
-      check('弹窗版本为 1.10.0', footerText.includes('v1.10.0'), footerText);
+      check('弹窗版本为 1.11.0', footerText.includes('v1.11.0'), footerText);
 
       const liveProgressWidth = await popup.$eval('#liveProgress', el => el.style.width || '0%');
       const livePct = parseFloat(liveProgressWidth) || 0;
@@ -295,7 +295,47 @@ function sleep(ms) {
       } else {
         check('扩展图标 badge 为 ON', false, '无法访问 service worker');
       }
+
+      await popup.close();
     }
+
+    // 人脸/人工验证：仅检测并暂停，不绕过
+    await page.evaluate(() => window.__showFace());
+    await sleep(3500);
+    const afterFace = await page.evaluate(() => {
+      const detail = document.querySelector('#xxt-assistant-hud [data-role="detail"]');
+      const toggle = document.querySelector('#xxt-assistant-hud [data-role="toggle"]');
+      return {
+        detail: (detail && detail.textContent) || '',
+        toggle: (toggle && toggle.textContent) || ''
+      };
+    });
+    let facePausedInStorage = false;
+    const faceWorker = swTarget && swTarget.worker ? await swTarget.worker() : null;
+    if (faceWorker) {
+      facePausedInStorage = await faceWorker.evaluate(async () => {
+        const sync = await chrome.storage.sync.get({ isRunning: true });
+        return sync.isRunning === false;
+      });
+    }
+    check(
+      '检测到人工验证后自动暂停',
+      facePausedInStorage &&
+        afterFace.toggle === '开始' &&
+        /人工验证|人脸/.test(afterFace.detail),
+      JSON.stringify({ ...afterFace, facePausedInStorage })
+    );
+    // 恢复运行，供后续测验页用例使用
+    await page.evaluate(() => {
+      const mask = document.getElementById('faceMask');
+      if (mask) mask.style.display = 'none';
+    });
+    if (faceWorker) {
+      await faceWorker.evaluate(async () => {
+        await chrome.storage.sync.set({ isRunning: true });
+      });
+    }
+    await sleep(800);
 
     // 测验页跳过
     const quizPage = await browser.newPage();

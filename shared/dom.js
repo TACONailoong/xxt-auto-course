@@ -87,8 +87,22 @@ function xxtFormatSessionStats(stats, now = Date.now()) {
   const nextCount = Number(stats && stats.nextCount) || 0;
   const answerCount = Number(stats && stats.answerCount) || 0;
   const startedAt = Number(stats && stats.startedAt) || now;
-  const duration = xxtFormatDuration(now - startedAt);
+  const activeMs = Number(stats && stats.activeMs);
+  const durationMs =
+    Number.isFinite(activeMs) && activeMs >= 0 ? activeMs : now - startedAt;
+  const duration = xxtFormatDuration(durationMs);
   return `本会话 · ${duration} · 切章 ${nextCount} · 答题 ${answerCount}`;
+}
+
+function xxtIsManualVerificationText(text) {
+  const t = String(text || '');
+  return /人脸|刷脸|拍照验证|安全验证|请完成认证|身份验证|人脸识别|请允许.*摄像头/.test(
+    t
+  );
+}
+
+function xxtIsProtectedStatusPhase(phase) {
+  return ['limit', 'done', 'paused', 'verify', 'dead'].includes(String(phase || ''));
 }
 
 function xxtSummarizeOptions(settings) {
@@ -205,7 +219,9 @@ const XXT_DOM = {
   fingerprintText: xxtFingerprintText,
   pickSettings: xxtPickSettings,
   shouldStopByLimits: xxtShouldStopByLimits,
-  trimSet: xxtTrimSet
+  trimSet: xxtTrimSet,
+  isManualVerificationText: xxtIsManualVerificationText,
+  isProtectedStatusPhase: xxtIsProtectedStatusPhase
 };
 
 if (typeof globalThis !== 'undefined') {
@@ -229,7 +245,9 @@ if (typeof globalThis !== 'undefined') {
     xxtFingerprintText,
     xxtPickSettings,
     xxtShouldStopByLimits,
-    xxtTrimSet
+    xxtTrimSet,
+    xxtIsManualVerificationText,
+    xxtIsProtectedStatusPhase
   });
 }
 

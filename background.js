@@ -6,6 +6,7 @@ importScripts('shared/defaults.js');
 const DEFAULT_SETTINGS = globalThis.XXT_DEFAULT_SETTINGS;
 const STATUS_KEY = globalThis.XXT_STATUS_KEY;
 const HUD_LAYOUT_KEY = globalThis.XXT_HUD_LAYOUT_KEY;
+const RELOAD_HINT_KEY = globalThis.XXT_RELOAD_HINT_KEY || 'xxtReloadHint';
 
 async function ensureDefaults() {
   const current = await chrome.storage.sync.get(DEFAULT_SETTINGS);
@@ -70,6 +71,9 @@ chrome.runtime.onInstalled.addListener(async details => {
     console.log('学习通自动刷课助手已安装');
   } else if (details.reason === 'update') {
     console.log('学习通自动刷课助手已更新到', chrome.runtime.getManifest().version);
+    try {
+      await chrome.storage.local.set({ [RELOAD_HINT_KEY]: Date.now() });
+    } catch (_) {}
   }
   await updateBadgeFromState();
 });
