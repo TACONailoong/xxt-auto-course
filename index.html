@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>樱色日记 ～Sakura Diary～</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/main.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- 樱花粒子层 -->
+    <canvas id="petal-canvas" aria-hidden="true"></canvas>
+
+    <!-- 标题画面 -->
+    <section id="screen-title" class="screen active">
+      <div class="title-bg" style="background-image:url('assets/bg/bg-title.png')"></div>
+      <div class="title-veil"></div>
+      <div class="title-content">
+        <p class="title-sub">桜丘学院恋愛アドベンチャー</p>
+        <h1 class="title-brand">樱色日记</h1>
+        <p class="title-en">Sakura Diary</p>
+        <p class="title-tagline">在樱花飘落的季节里，写下属于你的校园恋曲。</p>
+        <nav class="title-menu">
+          <button class="menu-btn" data-action="new-game">开始游戏</button>
+          <button class="menu-btn" data-action="continue">继续游戏</button>
+          <button class="menu-btn" data-action="gallery">回忆图鉴</button>
+          <button class="menu-btn" data-action="settings">游戏设置</button>
+        </nav>
+      </div>
+      <p class="title-hint">点击对话框或按空格继续 · Esc 打开菜单</p>
+    </section>
+
+    <!-- 游戏主画面 -->
+    <section id="screen-game" class="screen">
+      <div id="bg-layer" class="bg-layer"></div>
+      <div id="cg-layer" class="cg-layer hidden"></div>
+      <div id="char-layer" class="char-layer">
+        <img id="char-sprite" class="char-sprite hidden" alt="" />
+      </div>
+      <div id="effect-layer" class="effect-layer"></div>
+
+      <div id="chapter-banner" class="chapter-banner hidden">
+        <span id="chapter-label"></span>
+      </div>
+
+      <div id="choice-panel" class="choice-panel hidden"></div>
+
+      <div id="textbox" class="textbox">
+        <div class="textbox-inner">
+          <div id="speaker" class="speaker hidden"></div>
+          <p id="dialogue" class="dialogue"></p>
+          <span id="continue-marker" class="continue-marker">▼</span>
+        </div>
+        <div class="game-toolbar">
+          <button type="button" data-tool="auto" title="自动播放">AUTO</button>
+          <button type="button" data-tool="skip" title="快进">SKIP</button>
+          <button type="button" data-tool="save" title="存档">SAVE</button>
+          <button type="button" data-tool="load" title="读档">LOAD</button>
+          <button type="button" data-tool="log" title="回看">LOG</button>
+          <button type="button" data-tool="menu" title="菜单">MENU</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 结局画面 -->
+    <section id="screen-ending" class="screen">
+      <div id="ending-bg" class="ending-bg"></div>
+      <div class="ending-veil"></div>
+      <div class="ending-content">
+        <p id="ending-badge" class="ending-badge"></p>
+        <h2 id="ending-title" class="ending-title"></h2>
+        <p id="ending-text" class="ending-text"></p>
+        <div class="ending-actions">
+          <button class="menu-btn" data-action="gallery-from-end">查看图鉴</button>
+          <button class="menu-btn" data-action="title">返回标题</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 遮罩弹层 -->
+    <div id="overlay" class="overlay hidden">
+      <div class="modal" id="modal-root"></div>
+    </div>
+  </div>
+
+  <script src="js/story.js"></script>
+  <script src="js/engine.js"></script>
+</body>
+</html>
