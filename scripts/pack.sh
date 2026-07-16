@@ -12,13 +12,18 @@ ZIP_PATH="${OUT_DIR}/${ZIP_NAME}"
 mkdir -p "$OUT_DIR"
 rm -f "$ZIP_PATH"
 
-zip -r "$ZIP_PATH" . \
-  -x "*.git*" \
-  -x "*node_modules*" \
-  -x "*tests/browsers*" \
-  -x "*dist*" \
-  -x "*.DS_Store" \
-  -x "*package-lock.json"
+# 仅打包扩展运行所需文件，排除开发/测试产物
+zip -r "$ZIP_PATH" \
+  manifest.json \
+  background.js \
+  content.js \
+  popup.html \
+  popup.css \
+  popup.js \
+  icons \
+  shared \
+  README.md \
+  CHANGELOG.md
 
 echo "Packed: ${ZIP_PATH}"
 ls -lh "$ZIP_PATH"
