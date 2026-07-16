@@ -106,6 +106,31 @@ function xxtCreateEmptyStats(now = Date.now()) {
   return { nextCount: 0, answerCount: 0, startedAt: now };
 }
 
+function xxtCountRemainingCatalog(items) {
+  if (!Array.isArray(items)) return 0;
+  let count = 0;
+  for (const item of items) {
+    const tipText = String((item && item.tipText) || '');
+    if (!tipText.includes('已完成')) count += 1;
+  }
+  return count;
+}
+
+function xxtFingerprintText(text, maxLen = 160) {
+  return xxtNormalizeText(text).slice(0, maxLen);
+}
+
+function xxtPickSettings(raw, defaults) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const out = { ...defaults };
+  for (const key of Object.keys(defaults)) {
+    if (Object.prototype.hasOwnProperty.call(src, key)) {
+      out[key] = src[key];
+    }
+  }
+  return out;
+}
+
 const XXT_DOM = {
   isVisible: xxtIsVisible,
   safeClick: xxtSafeClick,
@@ -120,7 +145,10 @@ const XXT_DOM = {
   formatSessionStats: xxtFormatSessionStats,
   summarizeOptions: xxtSummarizeOptions,
   isHighSpeed: xxtIsHighSpeed,
-  createEmptyStats: xxtCreateEmptyStats
+  createEmptyStats: xxtCreateEmptyStats,
+  countRemainingCatalog: xxtCountRemainingCatalog,
+  fingerprintText: xxtFingerprintText,
+  pickSettings: xxtPickSettings
 };
 
 if (typeof globalThis !== 'undefined') {
@@ -139,7 +167,10 @@ if (typeof globalThis !== 'undefined') {
     xxtFormatSessionStats,
     xxtSummarizeOptions,
     xxtIsHighSpeed,
-    xxtCreateEmptyStats
+    xxtCreateEmptyStats,
+    xxtCountRemainingCatalog,
+    xxtFingerprintText,
+    xxtPickSettings
   });
 }
 

@@ -113,5 +113,28 @@ test('createEmptyStats', () => {
   assert.deepStrictEqual(stats, { nextCount: 0, answerCount: 0, startedAt: 123 });
 });
 
+test('countRemainingCatalog', () => {
+  const items = [
+    { tipText: '未完成' },
+    { tipText: '已完成' },
+    { tipText: '未完成' },
+    { tipText: '' }
+  ];
+  assert.strictEqual(DOM.countRemainingCatalog(items), 3);
+});
+
+test('fingerprintText', () => {
+  assert.strictEqual(DOM.fingerprintText(' 题 目 A '), '题目A');
+});
+
+test('pickSettings 只合并已知键', () => {
+  const defaults = { isRunning: true, playbackSpeed: 1.5, mute: true };
+  const picked = DOM.pickSettings(
+    { playbackSpeed: 2, mute: false, evil: 1 },
+    defaults
+  );
+  assert.deepStrictEqual(picked, { isRunning: true, playbackSpeed: 2, mute: false });
+});
+
 console.log(failed === 0 ? '\n单元测试全部通过' : `\n单元测试失败: ${failed}`);
 process.exit(failed === 0 ? 0 : 1);

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "学习通自动刷课助手",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "自动播放学习通视频课程，支持倍速、静音、弹窗答题、防挂机提示、跳过测验与自动切章",
   "permissions": [
     "storage"
@@ -18,6 +18,22 @@
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
+    }
+  },
+  "commands": {
+    "toggle-run": {
+      "suggested_key": {
+        "default": "Alt+Shift+S",
+        "mac": "Alt+Shift+S"
+      },
+      "description": "切换自动刷课开关"
+    },
+    "show-hud": {
+      "suggested_key": {
+        "default": "Alt+Shift+H",
+        "mac": "Alt+Shift+H"
+      },
+      "description": "显示页面状态浮层"
     }
   },
   "content_scripts": [

@@ -46,6 +46,7 @@
         <span id="statsRow">本会话 · 0秒 · 切章 0 · 答题 0</span>
         <button class="ghost-btn" id="resetStatsQuickBtn" type="button" title="重置会话统计">重置</button>
       </div>
+      <div class="remain-row" id="remainRow" hidden>目录剩余未完成：—</div>
     </section>
 
     <section class="speed" aria-label="播放倍速">
@@ -127,6 +128,14 @@
           <button class="text-btn" id="resetStatsBtn" type="button">重置会话统计</button>
           <button class="text-btn" id="resetDefaultsBtn" type="button">恢复默认设置</button>
         </div>
+        <div class="more-actions">
+          <button class="text-btn" id="exportSettingsBtn" type="button">导出设置</button>
+          <button class="text-btn" id="importSettingsBtn" type="button">导入设置</button>
+          <input id="importSettingsInput" type="file" accept="application/json,.json" hidden>
+        </div>
+        <p class="shortcut-hint">
+          快捷键：Alt+Shift+S 开关 · Alt+Shift+H 显示浮层
+        </p>
       </div>
     </details>
 
@@ -141,7 +150,7 @@
     </section>
 
     <p class="save-hint" id="saveHint" role="status">已自动保存</p>
-    <footer class="footer">v1.7.0 · 仅供学习交流</footer>
+    <footer class="footer">v1.8.0 · 仅供学习交流</footer>
   </main>
 
   <!-- 兼容旧测试选择器 -->

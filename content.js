@@ -36,6 +36,8 @@
       `本会话 · 切章 ${stats.nextCount || 0} · 答题 ${stats.answerCount || 0}`);
   const createEmptyStats =
     DOM.createEmptyStats || (() => ({ nextCount: 0, answerCount: 0, startedAt: Date.now() }));
+  const countRemainingCatalog = DOM.countRemainingCatalog || (() => 0);
+  const fingerprintText = DOM.fingerprintText || (t => normalizeText(t).slice(0, 160));
 
   const IS_TOP = window.top === window.self;
   const STATUS_KEY =
@@ -67,10 +69,13 @@
       this.stats = createEmptyStats();
       this.dragState = null;
       this.hudDragBound = false;
+      this.answeredFingerprints = new Set();
+      this.toastTimer = null;
       this.status = {
         phase: 'idle',
         detail: '等待课程页面…',
         chapter: '',
+        remaining: null,
         hasVideo: false,
         progress: 0,
         updatedAt: Date.now()
@@ -138,6 +143,8 @@
         chrome.storage.onChanged.addListener((changes, area) => {
           if (!this.ensureAlive()) return;
           if (area === 'sync') {
+            const prevRunning = this.settings.isRunning;
+            const prevHud = this.settings.showHud;
             for (const key of Object.keys(DEFAULT_SETTINGS)) {
               if (changes[key]) this.settings[key] = changes[key].newValue;
             }
@@ -145,13 +152,29 @@
             if (IS_TOP) {
               this.ensureHud();
               this.updateHud();
+              if (changes.isRunning && prevRunning !== this.settings.isRunning) {
+                this.showToast(this.settings.isRunning ? '已开始自动刷课' : '已暂停自动刷课');
+              }
+              if (changes.showHud && !prevHud && this.settings.showHud) {
+                this.showToast('已显示状态浮层');
+              }
             }
           }
-          if (area === 'local' && changes[STATS_KEY] && IS_TOP) {
-            const next = changes[STATS_KEY].newValue;
-            this.stats = next && typeof next === 'object' ? next : createEmptyStats();
-            this.updateHud();
-            this.publishStatus(true);
+          if (area === 'local' && IS_TOP) {
+            if (changes[STATS_KEY]) {
+              const next = changes[STATS_KEY].newValue;
+              this.stats = next && typeof next === 'object' ? next : createEmptyStats();
+              this.updateHud();
+              this.publishStatus(true);
+            }
+            if (changes[HUD_LAYOUT_KEY] && changes[HUD_LAYOUT_KEY].newValue) {
+              this.hudLayout = {
+                ...this.hudLayout,
+                ...changes[HUD_LAYOUT_KEY].newValue
+              };
+              this.applyHudPosition();
+              this.updateHud();
+            }
           }
         });
       } catch (error) {
@@ -250,7 +273,66 @@
       if (title && title !== this.status.chapter) {
         this.status.chapter = title;
       }
+      this.refreshRemaining();
       return this.status.chapter;
+    }
+
+    refreshRemaining() {
+      if (!IS_TOP) return null;
+      const tree = document.querySelector('#coursetree');
+      if (!tree) {
+        this.status.remaining = null;
+        return null;
+      }
+      const items = [...tree.querySelectorAll('.posCatalog_select:not(.firstLayer)')].map(
+        el => ({
+          tipText:
+            (el.querySelector('.prevHoverTips') &&
+              el.querySelector('.prevHoverTips').textContent) ||
+            ''
+        })
+      );
+      this.status.remaining = countRemainingCatalog(items);
+      return this.status.remaining;
+    }
+
+    showToast(message) {
+      if (!IS_TOP || !message || !document.documentElement) return;
+      let toast = document.getElementById('xxt-assistant-toast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'xxt-assistant-toast';
+        Object.assign(toast.style, {
+          position: 'fixed',
+          left: '50%',
+          bottom: '88px',
+          transform: 'translateX(-50%) translateY(8px)',
+          zIndex: '2147483647',
+          padding: '10px 14px',
+          borderRadius: '10px',
+          background: 'rgba(20, 86, 71, 0.94)',
+          color: '#f4fbf8',
+          fontSize: '12px',
+          fontFamily: '"Avenir Next","PingFang SC","Microsoft YaHei UI",sans-serif',
+          boxShadow: '0 8px 24px rgba(20,35,31,0.28)',
+          opacity: '0',
+          transition: 'opacity 180ms ease, transform 180ms ease',
+          pointerEvents: 'none',
+          maxWidth: '80vw',
+          textAlign: 'center'
+        });
+        document.documentElement.appendChild(toast);
+      }
+      toast.textContent = message;
+      requestAnimationFrame(() => {
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateX(-50%) translateY(0)';
+      });
+      clearTimeout(this.toastTimer);
+      this.toastTimer = setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(-50%) translateY(8px)';
+      }, 2200);
     }
 
     // ---------- HUD ----------
@@ -599,7 +681,11 @@
       chapter.textContent = this.status.chapter || '未识别当前章节';
       toggle.textContent = this.settings.isRunning ? '暂停' : '开始';
       fill.style.width = `${pct}%`;
-      stats.textContent = formatSessionStats(this.stats);
+      const remainText =
+        typeof this.status.remaining === 'number'
+          ? ` · 剩余 ${this.status.remaining}`
+          : '';
+      stats.textContent = `${formatSessionStats(this.stats)}${remainText}`;
 
       if (!this.settings.isRunning) {
         detail.textContent = '已停止';
@@ -962,11 +1048,23 @@
       if (Date.now() - this.lastAnswerAt < 3000) return;
       const dialog = this.findQuestionDialog();
       if (!dialog) return;
+
+      const fp = fingerprintText(dialog.textContent || '');
+      if (fp && this.answeredFingerprints.has(fp)) {
+        // 同一题已处理过，只尝试再次点提交
+        this.clickSubmitButton(dialog);
+        this.lastAnswerAt = Date.now();
+        return;
+      }
+
       const result = this.answerQuestion(dialog);
       if (result && result.handled) {
         this.lastAnswerAt = Date.now();
         this.setStatus('answer', '已自动作答弹窗题');
-        if (result.fresh) this.bumpStat('answerCount');
+        if (result.fresh) {
+          if (fp) this.answeredFingerprints.add(fp);
+          this.bumpStat('answerCount');
+        }
       }
     }
 
@@ -1137,6 +1235,7 @@
 
       this.log('未找到下一章节入口，可能已学完');
       this.setStatus('done', '未找到下一节，可能已全部完成');
+      this.showToast('没有更多未完成小节了');
       return false;
     }
 
@@ -1201,6 +1300,11 @@
       }
       if (message.type === 'PING') {
         sendResponse({ ok: true, isTop: IS_TOP });
+        return false;
+      }
+      if (message.type === 'SHOW_TOAST' && IS_TOP) {
+        player.showToast(message.message || '');
+        sendResponse({ ok: true });
         return false;
       }
       return false;

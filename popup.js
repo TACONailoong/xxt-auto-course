@@ -35,6 +35,9 @@ const isHighSpeed =
 const createEmptyStats =
   (typeof xxtCreateEmptyStats === 'function' && xxtCreateEmptyStats) ||
   (() => ({ nextCount: 0, answerCount: 0, startedAt: Date.now() }));
+const pickSettings =
+  (typeof xxtPickSettings === 'function' && xxtPickSettings) ||
+  ((raw, defaults) => ({ ...defaults, ...(raw || {}) }));
 
 let settings = { ...DEFAULT_SETTINGS };
 let saveTimer = null;
@@ -105,6 +108,56 @@ function bindEvents() {
       await chrome.storage.sync.set(settings);
       showSaveHint('已恢复默认设置');
     });
+  }
+
+  const exportBtn = document.getElementById('exportSettingsBtn');
+  if (exportBtn) exportBtn.addEventListener('click', exportSettings);
+
+  const importBtn = document.getElementById('importSettingsBtn');
+  const importInput = document.getElementById('importSettingsInput');
+  if (importBtn && importInput) {
+    importBtn.addEventListener('click', () => importInput.click());
+    importInput.addEventListener('change', async () => {
+      const file = importInput.files && importInput.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const raw = JSON.parse(text);
+        settings = pickSettings(raw.settings || raw, DEFAULT_SETTINGS);
+        updateUI();
+        await chrome.storage.sync.set(settings);
+        showSaveHint('设置已导入');
+      } catch (error) {
+        console.error('导入失败:', error);
+        showSaveHint('导入失败，请检查文件');
+      } finally {
+        importInput.value = '';
+      }
+    });
+  }
+}
+
+async function exportSettings() {
+  try {
+    const payload = {
+      app: 'xuexitong-auto-player',
+      version: chrome.runtime.getManifest().version,
+      exportedAt: new Date().toISOString(),
+      settings
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json'
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `xuexitong-settings-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showSaveHint('设置已导出');
+  } catch (error) {
+    console.error('导出失败:', error);
+    showSaveHint('导出失败');
   }
 }
 
@@ -178,6 +231,7 @@ async function refreshLiveStatus() {
   const nowPanel = document.getElementById('nowPanel');
   const nowKicker = document.getElementById('nowKicker');
   const statsRow = document.getElementById('statsRow');
+  const remainRow = document.getElementById('remainRow');
 
   try {
     const result = await chrome.storage.local.get([STATUS_KEY, STATS_KEY]);
@@ -192,6 +246,7 @@ async function refreshLiveStatus() {
       nowPanel.classList.add('is-offline');
       nowPanel.classList.remove('is-online');
       nowKicker.textContent = '等待连接';
+      if (remainRow) remainRow.hidden = true;
       return;
     }
 
@@ -204,6 +259,15 @@ async function refreshLiveStatus() {
     if (status.hasVideo) parts.push(`${pct}%`);
     liveDetail.textContent = parts.join(' · ');
     liveProgress.style.width = `${pct}%`;
+
+    if (remainRow) {
+      if (typeof status.remaining === 'number') {
+        remainRow.hidden = false;
+        remainRow.textContent = `目录剩余未完成：${status.remaining}`;
+      } else {
+        remainRow.hidden = true;
+      }
+    }
   } catch (error) {
     liveChapter.textContent = '状态读取失败';
     liveDetail.textContent = '请重新打开扩展弹窗试试';

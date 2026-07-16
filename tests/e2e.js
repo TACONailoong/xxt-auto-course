@@ -204,6 +204,20 @@ function sleep(ms) {
       const online = await popup.$eval('#nowPanel', el => el.classList.contains('is-online'));
       check('弹窗处于已连接态', online);
 
+      const remainText = await popup.$eval('#remainRow', el => el.textContent);
+      const remainHidden = await popup.$eval('#remainRow', el => el.hidden);
+      check(
+        '弹窗显示剩余未完成数',
+        !remainHidden && /剩余未完成：\s*[1-9]/.test(remainText),
+        remainText
+      );
+
+      const shortcutHint = await popup.$eval('.shortcut-hint', el => el.textContent);
+      check('弹窗展示快捷键说明', shortcutHint.includes('Alt+Shift+S'), shortcutHint);
+
+      const exportExists = await popup.$eval('#exportSettingsBtn', el => !!el).catch(() => false);
+      check('支持导出设置入口', exportExists);
+
       // 恢复到 2x，供后续即时保存断言使用
       await popup.click('.preset-btn[data-speed="2"]');
 
