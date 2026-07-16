@@ -46,12 +46,16 @@ function xxtNormalizeText(text) {
 }
 
 function xxtPickNextCatalogItem(items, activeIndex) {
+  const n = Array.isArray(items) ? items.length : 0;
+  if (!n) return null;
   const start = Number.isInteger(activeIndex) ? activeIndex : -1;
-  for (let i = start + 1; i < items.length; i++) {
-    const item = items[i];
-    const tipText = item.tipText || '';
-    if (String(tipText).includes('已完成')) continue;
-    return { index: i, item };
+  // 先向后找，再从头回绕，跳过当前项与已完成项
+  for (let offset = 1; offset <= n; offset++) {
+    const i = start < 0 ? offset - 1 : (start + offset) % n;
+    if (start >= 0 && i === start) continue;
+    const tipText = String((items[i] && items[i].tipText) || '');
+    if (tipText.includes('已完成')) continue;
+    return { index: i, item: items[i] };
   }
   return null;
 }
@@ -108,6 +112,7 @@ function xxtShouldStopByLimits(stats, settings, now = Date.now()) {
   const maxMinutes = Number(settings && settings.maxMinutes) || 0;
   const nextCount = Number(stats && stats.nextCount) || 0;
   const startedAt = Number(stats && stats.startedAt) || now;
+  const activeMs = Number(stats && stats.activeMs);
 
   if (maxChapters > 0 && nextCount >= maxChapters) {
     return {
@@ -116,7 +121,11 @@ function xxtShouldStopByLimits(stats, settings, now = Date.now()) {
     };
   }
   if (maxMinutes > 0) {
-    const elapsedMin = (now - startedAt) / 60000;
+    // 优先用活跃学习时长；旧会话无 activeMs 时回退墙钟时间
+    const elapsedMin =
+      Number.isFinite(activeMs) && activeMs >= 0
+        ? activeMs / 60000
+        : (now - startedAt) / 60000;
     if (elapsedMin >= maxMinutes) {
       return {
         stop: true,
@@ -138,14 +147,16 @@ function xxtIsHighSpeed(speed) {
 }
 
 function xxtCreateEmptyStats(now = Date.now()) {
-  return { nextCount: 0, answerCount: 0, startedAt: now };
+  return { nextCount: 0, answerCount: 0, startedAt: now, activeMs: 0 };
 }
 
 function xxtCountRemainingCatalog(items) {
   if (!Array.isArray(items)) return 0;
   let count = 0;
   for (const item of items) {
-    const tipText = String((item && item.tipText) || '');
+    const tipText = String((item && item.tipText) || '').trim();
+    // 提示未加载时不计，避免剩余数被空 tip 虚高
+    if (!tipText) continue;
     if (!tipText.includes('已完成')) count += 1;
   }
   return count;
@@ -159,9 +170,18 @@ function xxtPickSettings(raw, defaults) {
   const src = raw && typeof raw === 'object' ? raw : {};
   const out = { ...defaults };
   for (const key of Object.keys(defaults)) {
-    if (Object.prototype.hasOwnProperty.call(src, key)) {
-      out[key] = src[key];
+    if (!Object.prototype.hasOwnProperty.call(src, key)) continue;
+    const def = defaults[key];
+    let val = src[key];
+    if (typeof def === 'boolean') {
+      val = !!val;
+    } else if (typeof def === 'number') {
+      val = Number(val);
+      if (!Number.isFinite(val)) val = def;
+    } else if (typeof def === 'string') {
+      val = val == null ? def : String(val);
     }
+    out[key] = val;
   }
   return out;
 }

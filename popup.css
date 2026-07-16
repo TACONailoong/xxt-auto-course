@@ -257,10 +257,18 @@ body::before {
 }
 
 .shortcut-hint {
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   font-size: 11px;
   color: var(--muted);
   line-height: 1.5;
+}
+
+.bg-hint {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.45;
+  opacity: 0.9;
 }
 
 .limit-grid {

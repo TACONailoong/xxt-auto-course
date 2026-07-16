@@ -273,8 +273,10 @@ async function refreshLiveStatus() {
     nowKicker.textContent = settings.isRunning ? '正在学习' : '已暂停';
     liveChapter.textContent = status.chapter || '未识别当前章节';
     const pct = formatProgress(status.progress);
-    const parts = [status.detail || '运行中'];
-    if (status.hasVideo) parts.push(`${pct}%`);
+    const detail =
+      status.detail || (settings.isRunning ? '运行中' : '已暂停自动刷课');
+    const parts = [detail];
+    if (status.hasVideo && pct > 0) parts.push(`${pct}%`);
     liveDetail.textContent = parts.join(' · ');
     liveProgress.style.width = `${pct}%`;
 

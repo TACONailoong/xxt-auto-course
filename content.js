@@ -80,6 +80,11 @@
       this.toastTimer = null;
       this.hadRemaining = false;
       this.limitPausePending = false;
+      this.lastRelayAt = 0;
+      this.lastActiveTickAt = 0;
+      this.lastActivePersistAt = 0;
+      this.recoverLevel = 0;
+      this.lastRecoverAt = 0;
       this.status = {
         phase: 'idle',
         detail: '等待课程页面…',
@@ -162,7 +167,12 @@
               this.ensureHud();
               this.updateHud();
               if (changes.isRunning && prevRunning !== this.settings.isRunning) {
-                this.showToast(this.settings.isRunning ? '已开始自动刷课' : '已暂停自动刷课');
+                if (this.settings.isRunning) {
+                  this.lastActiveTickAt = 0;
+                  this.showToast('已开始自动刷课');
+                } else if (!this.limitPausePending) {
+                  this.showToast('已暂停自动刷课');
+                }
               }
               if (changes.showHud && !prevHud && this.settings.showHud) {
                 this.showToast('已显示状态浮层');
@@ -200,7 +210,10 @@
         if (video.paused && !video.ended) this.tryPlay(video);
       } else if (!video.paused) {
         video.pause();
-        this.setStatus('paused', '已暂停自动刷课');
+        // 限流/学完暂停时保留原因，勿覆盖
+        if (!['limit', 'done'].includes(this.status.phase)) {
+          this.setStatus('paused', '已暂停自动刷课');
+        }
       }
     }
 
@@ -217,6 +230,8 @@
         this.updateHud();
         this.publishStatus(true);
         if (shouldLogStatusChange(prevDetail, detail)) this.pushLog(detail);
+      } else {
+        this.relayFrameStatus(true);
       }
     }
 
@@ -229,6 +244,81 @@
       if (IS_TOP) {
         this.updateHudProgressOnly();
         this.publishStatus(false);
+      } else {
+        this.relayFrameStatus(false);
+      }
+    }
+
+    relayFrameStatus(force = false) {
+      const now = Date.now();
+      if (!force && now - this.lastRelayAt < 800) return;
+      this.lastRelayAt = now;
+      try {
+        window.parent.postMessage(
+          {
+            type: 'XXT_FRAME_STATUS',
+            force: !!force,
+            payload: {
+              phase: this.status.phase,
+              detail: this.status.detail,
+              progress: this.status.progress,
+              hasVideo: !!this.status.hasVideo,
+              updatedAt: this.status.updatedAt
+            }
+          },
+          '*'
+        );
+      } catch (_) {}
+    }
+
+    applyFrameStatus(payload, force = false) {
+      if (!IS_TOP || !payload || typeof payload !== 'object') return;
+      const prevDetail = this.status.detail;
+      const nextDetail =
+        typeof payload.detail === 'string' && payload.detail
+          ? payload.detail
+          : this.status.detail;
+      this.status = {
+        ...this.status,
+        phase: payload.phase || this.status.phase,
+        detail: nextDetail,
+        progress:
+          typeof payload.progress === 'number'
+            ? payload.progress
+            : this.status.progress,
+        hasVideo:
+          typeof payload.hasVideo === 'boolean'
+            ? payload.hasVideo
+            : this.status.hasVideo,
+        updatedAt: Date.now()
+      };
+      if (force || shouldLogStatusChange(prevDetail, nextDetail)) {
+        this.updateHud();
+        this.publishStatus(true);
+        if (shouldLogStatusChange(prevDetail, nextDetail)) this.pushLog(nextDetail);
+      } else {
+        this.updateHudProgressOnly();
+        this.publishStatus(false);
+      }
+    }
+
+    accumulateActiveTime() {
+      if (!IS_TOP) return;
+      const now = Date.now();
+      if (!this.settings.isRunning) {
+        this.lastActiveTickAt = 0;
+        return;
+      }
+      if (!this.lastActiveTickAt) {
+        this.lastActiveTickAt = now;
+        return;
+      }
+      const delta = Math.min(Math.max(0, now - this.lastActiveTickAt), 4000);
+      this.lastActiveTickAt = now;
+      this.stats.activeMs = (Number(this.stats.activeMs) || 0) + delta;
+      if (now - this.lastActivePersistAt >= 5000) {
+        this.lastActivePersistAt = now;
+        this.persistStats();
       }
     }
 
@@ -378,7 +468,8 @@
           this.stats = {
             nextCount: Number(stats.nextCount) || 0,
             answerCount: Number(stats.answerCount) || 0,
-            startedAt: Number(stats.startedAt) || Date.now()
+            startedAt: Number(stats.startedAt) || Date.now(),
+            activeMs: Number(stats.activeMs) || 0
           };
         } else {
           await this.persistStats();
@@ -399,12 +490,9 @@
       if (!this.ensureAlive()) return;
       try {
         const result = await chrome.storage.local.get(STATS_KEY);
-        const stats = result[STATS_KEY] || {
-          nextCount: 0,
-          answerCount: 0,
-          startedAt: Date.now()
-        };
+        const stats = result[STATS_KEY] || createEmptyStats();
         stats[key] = (Number(stats[key]) || 0) + 1;
+        stats.activeMs = Number(stats.activeMs) || Number(this.stats.activeMs) || 0;
         this.stats = stats;
         await chrome.storage.local.set({ [STATS_KEY]: stats });
         if (IS_TOP) {
@@ -733,8 +821,12 @@
       stats.textContent = `${formatSessionStats(this.stats)}${remainText}`;
 
       if (!this.settings.isRunning) {
-        detail.textContent = '已停止';
-        meta.textContent = '点击“开始”或在扩展弹窗中开启';
+        const keepReason =
+          ['limit', 'done', 'paused'].includes(this.status.phase) && this.status.detail;
+        detail.textContent = keepReason || '已停止';
+        meta.textContent = keepReason
+          ? '可点“开始”继续，或重置会话统计后继续'
+          : '点击“开始”或在扩展弹窗中开启';
         this.hud.style.opacity = '0.75';
         return;
       }
@@ -806,15 +898,25 @@
 
     setupVideo(video) {
       this.log('检测到视频，开始接管');
+      this.recoverLevel = 0;
       this.setStatus('playing', '已接管视频', { hasVideo: true });
 
       video.addEventListener('play', () => {
         if (this.settings.isRunning) {
           video.playbackRate = this.settings.playbackSpeed;
           if (this.settings.mute) video.muted = true;
+          this.recoverLevel = 0;
           this.setStatus('playing', '正在播放', { hasVideo: true });
         }
       });
+
+      video.addEventListener('playing', () => {
+        this.recoverLevel = 0;
+      });
+
+      video.addEventListener('waiting', () => this.onVideoBuffering(video));
+      video.addEventListener('stalled', () => this.onVideoBuffering(video));
+      video.addEventListener('error', () => this.recoverVideo(video, 'error'));
 
       video.addEventListener('ratechange', () => {
         if (
@@ -832,6 +934,7 @@
 
       video.addEventListener('ended', () => {
         this.log('视频播放完成');
+        this.recoverLevel = 0;
         this.setStatus('next', '视频结束，准备下一节', { hasVideo: true, progress: 1 });
         if (this.settings.isRunning && this.settings.autoNext) {
           setTimeout(
@@ -846,6 +949,49 @@
         video.playbackRate = this.settings.playbackSpeed;
         this.tryPlay(video);
       }
+    }
+
+    onVideoBuffering(video) {
+      if (!this.settings.isRunning || !video || video.ended) return;
+      if (Date.now() - this.lastRecoverAt < 3000) return;
+      this.setStatus('recover', '播放卡顿，正在恢复…', { hasVideo: true });
+      this.recoverVideo(video, 'buffer');
+    }
+
+    recoverVideo(video, reason) {
+      if (!this.settings.isRunning || !video || video.ended) return;
+      const now = Date.now();
+      if (now - this.lastRecoverAt < 2500) return;
+      this.lastRecoverAt = now;
+      this.recoverLevel = Math.min((this.recoverLevel || 0) + 1, 4);
+      this.log('恢复播放:', reason, 'level', this.recoverLevel);
+      this.setStatus('recover', '播放卡顿，正在恢复…', { hasVideo: true });
+
+      if (this.recoverLevel <= 1) {
+        this.clickPlayOverlay();
+        this.tryPlay(video);
+        return;
+      }
+      if (this.recoverLevel === 2) {
+        video.muted = true;
+        this.tryPlay(video);
+        return;
+      }
+      if (this.recoverLevel === 3) {
+        try {
+          video.currentTime = Math.max(0, (video.currentTime || 0) + 0.25);
+        } catch (_) {}
+        this.tryPlay(video);
+        return;
+      }
+      try {
+        const t = video.currentTime || 0;
+        video.load();
+        video.currentTime = t;
+      } catch (_) {}
+      if (this.settings.mute) video.muted = true;
+      video.playbackRate = this.settings.playbackSpeed;
+      this.tryPlay(video);
     }
 
     tryPlay(video) {
@@ -890,6 +1036,7 @@
       if (IS_TOP) {
         this.ensureHud();
         this.refreshChapterTitle();
+        this.accumulateActiveTime();
       }
 
       if (!this.settings.isRunning) {
@@ -932,12 +1079,15 @@
         if (Math.abs(t - this.stallLastTime) < 0.05) {
           if (this.stallLastWall && now - this.stallLastWall >= 8000) {
             this.log('检测到播放卡顿，尝试恢复');
-            this.tryPlay(video);
+            this.recoverVideo(video, 'stall');
             this.stallLastWall = now;
           }
         } else {
           this.stallLastTime = t;
           this.stallLastWall = now;
+          if (this.recoverLevel > 0 && this.status.phase === 'recover') {
+            this.recoverLevel = 0;
+          }
         }
 
         const progress = video.duration ? t / video.duration : this.status.progress;
@@ -1341,6 +1491,8 @@
       await player.loadStats();
       player.publishStatus(true);
       player.updateHud();
+    } else if (event.data.type === 'XXT_FRAME_STATUS') {
+      player.applyFrameStatus(event.data.payload, !!event.data.force);
     }
   });
 

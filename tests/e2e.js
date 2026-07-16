@@ -128,6 +128,23 @@ function sleep(ms) {
     check('视频已自动播放', videoState && videoState.paused === false, JSON.stringify(videoState));
     check('默认静音播放', videoState && videoState.muted === true, JSON.stringify(videoState));
 
+    // iframe 进度应同步到顶层浮层
+    await sleep(2500);
+    let hudProgress = 0;
+    for (let i = 0; i < 6; i++) {
+      hudProgress = await page
+        .evaluate(() => {
+          const fill = document.querySelector('#xxt-assistant-hud [data-role="bar-fill"]');
+          if (!fill) return 0;
+          const w = fill.style.width || '0%';
+          return parseFloat(w) || 0;
+        })
+        .catch(() => 0);
+      if (hudProgress > 0) break;
+      await sleep(1000);
+    }
+    check('浮层进度已从 iframe 同步', hudProgress > 0, `progress=${hudProgress}%`);
+
     // 防挂机弹窗
     await page.evaluate(() => window.__showIdle());
     await sleep(3500);
@@ -214,7 +231,11 @@ function sleep(ms) {
       check('弹窗提供会话限流输入', maxChaptersExists && maxMinutesExists);
 
       const footerText = await popup.$eval('.footer', el => el.textContent);
-      check('弹窗版本为 1.9.0', footerText.includes('v1.9.0'), footerText);
+      check('弹窗版本为 1.10.0', footerText.includes('v1.10.0'), footerText);
+
+      const liveProgressWidth = await popup.$eval('#liveProgress', el => el.style.width || '0%');
+      const livePct = parseFloat(liveProgressWidth) || 0;
+      check('弹窗进度条反映播放进度', livePct > 0, `width=${liveProgressWidth}`);
 
       await popup.click('.preset-btn[data-speed="3"]');
       await sleep(200);

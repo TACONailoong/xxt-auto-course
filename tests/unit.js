@@ -69,6 +69,17 @@ test('pickNextCatalogItem 没有下一节返回 null', () => {
   assert.strictEqual(DOM.pickNextCatalogItem(items, 0), null);
 });
 
+test('pickNextCatalogItem 回绕到更早的未完成节', () => {
+  const items = [
+    { tipText: '未完成', title: 'a' },
+    { tipText: '已完成', title: 'b' },
+    { tipText: '未完成', title: 'c' }
+  ];
+  const picked = DOM.pickNextCatalogItem(items, 2);
+  assert.strictEqual(picked.index, 0);
+  assert.strictEqual(picked.item.title, 'a');
+});
+
 test('shouldLogStatusChange', () => {
   assert.strictEqual(DOM.shouldLogStatusChange('a', 'b'), true);
   assert.strictEqual(DOM.shouldLogStatusChange('a', 'a'), false);
@@ -123,10 +134,10 @@ test('shouldStopByLimits 切章上限', () => {
   assert.ok(result.reason.includes('切章上限'));
 });
 
-test('shouldStopByLimits 时长上限', () => {
+test('shouldStopByLimits 时长上限（活跃时长）', () => {
   const now = Date.now();
   const result = DOM.shouldStopByLimits(
-    { nextCount: 0, startedAt: now - 10 * 60000 },
+    { nextCount: 0, startedAt: now, activeMs: 6 * 60000 },
     { maxChapters: 0, maxMinutes: 5 },
     now
   );
@@ -134,10 +145,20 @@ test('shouldStopByLimits 时长上限', () => {
   assert.ok(result.reason.includes('时长上限'));
 });
 
+test('shouldStopByLimits 暂停时间不计入活跃时长', () => {
+  const now = Date.now();
+  const result = DOM.shouldStopByLimits(
+    { nextCount: 0, startedAt: now - 60 * 60000, activeMs: 2 * 60000 },
+    { maxChapters: 0, maxMinutes: 5 },
+    now
+  );
+  assert.strictEqual(result.stop, false);
+});
+
 test('shouldStopByLimits 未超限', () => {
   const now = Date.now();
   const result = DOM.shouldStopByLimits(
-    { nextCount: 1, startedAt: now },
+    { nextCount: 1, startedAt: now, activeMs: 0 },
     { maxChapters: 5, maxMinutes: 30 },
     now
   );
@@ -161,7 +182,12 @@ test('isHighSpeed', () => {
 
 test('createEmptyStats', () => {
   const stats = DOM.createEmptyStats(123);
-  assert.deepStrictEqual(stats, { nextCount: 0, answerCount: 0, startedAt: 123 });
+  assert.deepStrictEqual(stats, {
+    nextCount: 0,
+    answerCount: 0,
+    startedAt: 123,
+    activeMs: 0
+  });
 });
 
 test('countRemainingCatalog', () => {
@@ -171,7 +197,8 @@ test('countRemainingCatalog', () => {
     { tipText: '未完成' },
     { tipText: '' }
   ];
-  assert.strictEqual(DOM.countRemainingCatalog(items), 3);
+  // 空 tip 不计，避免目录提示未加载时虚高
+  assert.strictEqual(DOM.countRemainingCatalog(items), 2);
 });
 
 test('fingerprintText', () => {
@@ -185,6 +212,17 @@ test('pickSettings 只合并已知键', () => {
     defaults
   );
   assert.deepStrictEqual(picked, { isRunning: true, playbackSpeed: 2, mute: false });
+});
+
+test('pickSettings 强制类型', () => {
+  const defaults = { isRunning: true, playbackSpeed: 1.5, maxChapters: 0 };
+  const picked = DOM.pickSettings(
+    { isRunning: 0, playbackSpeed: '2.5', maxChapters: '3' },
+    defaults
+  );
+  assert.strictEqual(picked.isRunning, false);
+  assert.strictEqual(picked.playbackSpeed, 2.5);
+  assert.strictEqual(picked.maxChapters, 3);
 });
 
 console.log(failed === 0 ? '\n单元测试全部通过' : `\n单元测试失败: ${failed}`);
