@@ -918,6 +918,169 @@ html, body {
   to { opacity: 1; }
 }
 
+/* Loot floating text */
+.loot-float {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  z-index: 35;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  text-shadow: 0 0 8px rgba(0,0,0,0.8);
+  white-space: nowrap;
+}
+
+/* Waypoint HUD */
+#waypoint-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 24;
+}
+
+.wp-marker {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+
+.wp-diamond {
+  width: 10px;
+  height: 10px;
+  margin: 0 auto 0.2rem;
+  background: var(--wp, var(--amber));
+  transform: rotate(45deg);
+  box-shadow: 0 0 10px var(--wp, var(--amber));
+}
+
+.wp-info {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  color: var(--text);
+  background: rgba(5, 10, 18, 0.65);
+  border: 1px solid color-mix(in srgb, var(--wp, var(--amber)) 50%, transparent);
+  padding: 0.15rem 0.4rem;
+  white-space: nowrap;
+}
+
+.wp-info span:first-child { color: var(--wp, var(--amber)); }
+
+/* Analysis visor */
+#visor-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 26;
+  pointer-events: none;
+}
+
+#visor-overlay .visor-frame {
+  position: absolute;
+  inset: 8%;
+  border: 1px solid rgba(62, 207, 180, 0.35);
+  box-shadow: inset 0 0 60px rgba(62, 207, 180, 0.08);
+  clip-path: polygon(0 12px, 12px 0, calc(100% - 12px) 0, 100% 12px, 100% calc(100% - 12px), calc(100% - 12px) 100%, 12px 100%, 0 calc(100% - 12px));
+}
+
+#visor-overlay .visor-label {
+  position: absolute;
+  top: 9%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  letter-spacing: 0.35em;
+  color: var(--cyan);
+  text-shadow: 0 0 12px rgba(62, 207, 180, 0.6);
+}
+
+#visor-tags { position: absolute; inset: 0; }
+
+.visor-tag {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  border: 1px solid var(--cyan);
+  background: rgba(5, 12, 20, 0.75);
+  padding: 0.2rem 0.45rem;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 72px;
+}
+
+.visor-tag::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 1px;
+  height: 6px;
+  background: currentColor;
+  transform: translateX(-50%);
+}
+
+.vt-dist { color: var(--muted); }
+
+/* Storm */
+#storm-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 27;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at center, transparent 30%, rgba(20, 40, 60, 0.45) 100%),
+    repeating-linear-gradient(
+      110deg,
+      transparent,
+      transparent 3px,
+      rgba(180, 210, 230, 0.04) 3px,
+      rgba(180, 210, 230, 0.04) 5px
+    );
+  animation: stormFlicker 0.15s steps(2) infinite;
+}
+
+#storm-overlay.hidden { display: none !important; }
+
+.storm-warn {
+  position: absolute;
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  letter-spacing: 0.3em;
+  color: var(--danger);
+  text-shadow: 0 0 16px rgba(232, 69, 60, 0.7);
+  animation: pulseGlow 1s ease-in-out infinite;
+}
+
+@keyframes stormFlicker {
+  from { opacity: 0.85; }
+  to { opacity: 1; }
+}
+
+#target-info {
+  position: absolute;
+  left: 50%;
+  top: 54%;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  z-index: 22;
+  pointer-events: none;
+  background: rgba(5,10,18,0.5);
+  padding: 0.2rem 0.55rem;
+  border: 1px solid rgba(62, 207, 180, 0.2);
+}
+
 @media (max-width: 700px) {
   .brand-name { letter-spacing: 0.1em; }
   #mission-panel { width: calc(100% - 2rem); }
@@ -925,4 +1088,5 @@ html, body {
   #resource-strip { display: none; }
   .ship-systems { left: 4%; width: 120px; }
   .title-hints { display: none; }
+  .wp-info { font-size: 0.55rem; }
 }

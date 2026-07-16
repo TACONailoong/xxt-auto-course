@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { PLANETS, BLOCKS } from './constants.js';
+import { PLANETS, BLOCKS, ITEMS } from './constants.js';
 import { Inventory } from '../systems/Inventory.js';
 import { MissionSystem } from '../systems/Mission.js';
 import { PlanetEntry } from '../systems/PlanetEntry.js';
+import { Effects, StormSystem, AnalysisVisor } from '../systems/Effects.js';
 import { VoxelWorld } from '../world/VoxelWorld.js';
 import { SpaceScene } from '../world/SpaceScene.js';
 import { PlayerController } from '../entities/Player.js';
@@ -13,6 +14,7 @@ import {
   createDistressBeacon,
 } from '../models/ShipModel.js';
 import { UIManager } from '../ui/UIManager.js';
+import { WaypointHUD } from '../ui/WaypointHUD.js';
 import { Multiplayer } from '../net/Multiplayer.js';
 import { sound } from '../audio/SoundManager.js';
 
@@ -48,6 +50,10 @@ export class Game {
     this._keyLatch = {};
     this.spaceGrace = 0;
     this._mining = false;
+    this.effects = null;
+    this.storm = null;
+    this.visor = null;
+    this.waypoints = null;
   }
 
   log(text) {
@@ -75,6 +81,7 @@ export class Game {
     this.scene.fog = new THREE.Fog(0x6ab0d0, 40, 140);
 
     this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 3000);
+    this.scene.add(this.camera); // so held multi-tool renders
 
     this.ui.setLoading(0.3, '生成方块行星…');
     await this._delay(50);
@@ -83,6 +90,11 @@ export class Game {
     const planet = PLANETS.find((p) => p.id === this.currentPlanetId);
     this.world = new VoxelWorld(planet, this.scene);
     this.world.updateAround(0, 0, 4);
+
+    this.effects = new Effects(this.scene, this.camera);
+    this.storm = new StormSystem(this);
+    this.visor = new AnalysisVisor(this);
+    this.waypoints = new WaypointHUD(this);
 
     this.ui.setLoading(0.55, '部署坠毁星舰…');
     await this._delay(50);
@@ -130,15 +142,44 @@ export class Game {
     this.player = new PlayerController(this.camera, this.world);
     this.player.bind(this.canvas);
     this.player.spawn(2, 2);
+    // Face toward crashed ship
+    {
+      const dx = sx - 2.5;
+      const dz = sz - 2.5;
+      this.player.yaw = Math.atan2(-dx, -dz);
+    }
 
     // Guaranteed starter resources near spawn
     this._seedStarterResources();
+
+    // Tall smoke plume so ship is easy to spot
+    this._crashPlume = new THREE.Group();
+    for (let i = 0; i < 8; i++) {
+      const p = new THREE.Mesh(
+        new THREE.BoxGeometry(0.5 + i * 0.15, 0.5, 0.5 + i * 0.15),
+        new THREE.MeshBasicMaterial({
+          color: i < 3 ? 0xff6020 : 0x555555,
+          transparent: true,
+          opacity: 0.55 - i * 0.04,
+        })
+      );
+      p.position.set(sx + (Math.random() - 0.5) * 0.5, sy + 3 + i * 1.1, sz + (Math.random() - 0.5) * 0.5);
+      this._crashPlume.add(p);
+    }
+    this.scene.add(this._crashPlume);
 
     this.space = new SpaceScene(this.scene);
     this.space.build();
 
     this.ui.setLoading(0.8, '连接星际网络…');
     this.net.connect(this.playerName);
+
+    // Restore save if present
+    if (this._loadProgress()) {
+      this.log('检测到航迹存档，已恢复进度。');
+      if (this.flags.scannedShip) this.shipMarker.visible = true;
+      if (this.flags.beaconRead && !this.flags.hermeticTaken) this.buildingMarker.visible = true;
+    }
 
     this._bindInput();
     window.addEventListener('resize', () => this._onResize());
@@ -163,15 +204,22 @@ export class Game {
 
   _seedStarterResources() {
     const spots = [
+      [3, 2, BLOCKS.FERRITE_ROCK],
       [4, 3, BLOCKS.FERRITE_ROCK],
+      [5, 4, BLOCKS.FERRITE_ROCK],
       [5, 5, BLOCKS.FERRITE_ROCK],
+      [6, 6, BLOCKS.FERRITE_ROCK],
+      [7, 7, BLOCKS.FERRITE_ROCK],
       [3, 6, BLOCKS.FERRITE_ROCK],
       [7, 2, BLOCKS.FERRITE_ROCK],
+      [4, 5, BLOCKS.SODIUM_PLANT],
       [6, 7, BLOCKS.SODIUM_PLANT],
       [2, 8, BLOCKS.SODIUM_PLANT],
       [8, 4, BLOCKS.CARBON_PLANT],
+      [8, 5, BLOCKS.CARBON_PLANT],
       [9, 9, BLOCKS.DIHYDROGEN],
       [1, 5, BLOCKS.DIHYDROGEN],
+      [10, 8, BLOCKS.DIHYDROGEN],
     ];
     for (const [x, z, id] of spots) {
       const y = this.world.surfaceY(x, z);
@@ -294,9 +342,18 @@ export class Game {
           this.log('需要钠×5 充能防护。');
         }
       }
+      if (e.code === 'KeyV') {
+        this.visor?.setActive(true);
+        sound.scan();
+      }
+      if (e.code === 'KeyP') {
+        this.log(this._paused ? '继续航行。' : '已暂停。按 P 继续。');
+        this._paused = !this._paused;
+      }
     });
     window.addEventListener('keyup', (e) => {
       this._keyLatch[e.code] = false;
+      if (e.code === 'KeyV') this.visor?.setActive(false);
     });
 
     this._mining = false;
@@ -392,6 +449,18 @@ export class Game {
       // Board ship for flight
       this.mode = 'ship_planet';
       this.shipMesh.rotation.z = 0;
+      // Swap to repaired look
+      if (this.ship.repaired && this.shipMesh.userData.damaged !== false) {
+        const pos = this.shipMesh.position.clone();
+        const rotY = this.shipMesh.rotation.y;
+        this.scene.remove(this.shipMesh);
+        this.shipMesh = createStarship({ damaged: false, accent: 0x3ecfb4, engine: 0xe8a832, scale: 1.6 });
+        this.shipMesh.position.copy(pos);
+        this.shipMesh.rotation.y = rotY;
+        this.shipMesh.userData.damaged = false;
+        this.scene.add(this.shipMesh);
+        this.ship.mesh = this.shipMesh;
+      }
       sound.shipEnter();
       sound.liftoff();
       this.log('星舰就绪。WASD 飞行 · Space 升空 · 高度 120 进入太空。');
@@ -507,20 +576,46 @@ export class Game {
   _loop() {
     requestAnimationFrame(() => this._loop());
     const dt = Math.min(0.05, this._clock.getDelta());
+    if (this._paused) {
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
 
     if (this.mode === 'planet') {
       this.player.update(dt, this.inventory);
       this.world.updateAround(this.player.position.x, this.player.position.z, 3);
-      if (this._mining && this.player.pointerLocked) {
-        this.player.tryMine(this.inventory);
+      this.effects?.setHighlight(this.player.targetBlock);
+      this.effects?.setToolVisible(true);
+
+      const mining = this._mining && this.player.targetBlock && (this.player.pointerLocked || document.pointerLockElement === this.canvas);
+      if (mining) {
+        const from = this.camera.position.clone();
+        const to = this.player.getMineTargetPoint();
+        this.effects.setMiningBeam(true, from, to);
+        sound.beamHum();
+        const result = this.player.tryMine(this.inventory);
+        if (result) {
+          this.effects.spawnBreak(result.x, result.y, result.z, result.id);
+          if (result.item && result.qty) {
+            const def = ITEMS[result.item];
+            this.effects.spawnLootText(
+              new THREE.Vector3(result.x + 0.5, result.y + 1.2, result.z + 0.5),
+              `+${result.qty} ${def?.name || result.item}`,
+              def?.color || '#3ecfb4'
+            );
+          }
+        }
+      } else {
+        this.effects?.setMiningBeam(false);
       }
     } else if (this.mode === 'ship_planet') {
+      this.effects?.setHighlight(null);
+      this.effects?.setMiningBeam(false);
+      this.effects?.setToolVisible(false);
       this.ship.syncKeys(this.player.keys);
-      // Mouse look drives ship orientation
       this.ship.yaw = this.player.yaw;
       this.ship.pitch = this.player.pitch;
       const transition = this.ship.update(dt, 'ship_planet', this.camera);
-      // Write back yaw if A/D adjusted it
       this.player.yaw = this.ship.yaw;
       this.player.pitch = this.ship.pitch;
       this.ship.updateCamera(this.camera);
@@ -530,6 +625,7 @@ export class Game {
         this.enterSpace();
       }
     } else if (this.mode === 'space') {
+      this.effects?.setToolVisible(false);
       if (this.spaceGrace > 0) this.spaceGrace -= dt;
       this.ship.syncKeys(this.player.keys);
       this.ship.yaw = this.player.yaw;
@@ -572,14 +668,67 @@ export class Game {
       }
     }
 
+    // Animate crash plume
+    if (this._crashPlume && this.mode === 'planet') {
+      for (const c of this._crashPlume.children) {
+        c.position.y += Math.sin(performance.now() * 0.003 + c.position.x) * 0.01;
+        c.rotation.y += dt * 0.5;
+      }
+    }
+    if (this._crashPlume) this._crashPlume.visible = this.mode === 'planet' && this.currentPlanetId === 'awakening';
+
     this._updateMarkers(dt);
     this._updateInteractPrompt();
     this._updateCompass();
+    this.storm?.update(dt);
+    this.visor?.update(dt);
+    this.waypoints?.update();
+    this.effects?.update(dt, this.camera);
     this.mission.update();
     this.ui.update(dt);
     this.net.update(dt);
+    this._autosaveTimer = (this._autosaveTimer || 0) + dt;
+    if (this._autosaveTimer > 8) {
+      this._autosaveTimer = 0;
+      this._saveProgress();
+    }
 
     this.renderer.render(this.scene, this.camera);
+  }
+
+  _saveProgress() {
+    try {
+      const data = {
+        flags: this.flags,
+        inventory: this.inventory.items,
+        mission: this.mission.stageIndex,
+        ship: {
+          pulse: this.ship.pulseEngine,
+          launch: this.ship.launchThruster,
+        },
+        planet: this.currentPlanetId,
+        name: this.playerName,
+      };
+      localStorage.setItem('voxbound_save', JSON.stringify(data));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  _loadProgress() {
+    try {
+      const raw = localStorage.getItem('voxbound_save');
+      if (!raw) return false;
+      const data = JSON.parse(raw);
+      if (data.flags) Object.assign(this.flags, data.flags);
+      if (data.inventory) this.inventory.items = data.inventory;
+      if (typeof data.mission === 'number') this.mission.stageIndex = data.mission;
+      if (data.ship?.pulse) Object.assign(this.ship.pulseEngine, data.ship.pulse);
+      if (data.ship?.launch) Object.assign(this.ship.launchThruster, data.ship.launch);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   _onResize() {

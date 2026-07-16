@@ -9,7 +9,7 @@ export class PlanetEntry {
     this.game = game;
     this.active = false;
     this.timer = 0;
-    this.duration = 4.2;
+    this.duration = 5.5;
     this.targetPlanet = null;
     this.particles = null;
     this.heatLight = null;
@@ -51,19 +51,36 @@ export class PlanetEntry {
     );
     this.game.ship.mesh.add(this.particles);
 
-    // Voxel debris cubes
+    // Voxel debris cubes — denser Minecraft fusion
     this.debris = [];
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0; i < 40; i++) {
       const cube = new THREE.Mesh(
-        new THREE.BoxGeometry(0.4 + Math.random() * 0.8, 0.4 + Math.random() * 0.8, 0.4 + Math.random() * 0.8),
+        new THREE.BoxGeometry(0.35 + Math.random() * 1.0, 0.35 + Math.random() * 1.0, 0.35 + Math.random() * 1.0),
         new THREE.MeshBasicMaterial({
-          color: new THREE.Color().setHSL(0.08 + Math.random() * 0.06, 0.9, 0.5 + Math.random() * 0.2),
+          color: new THREE.Color().setHSL(0.06 + Math.random() * 0.1, 0.85, 0.45 + Math.random() * 0.25),
         })
       );
-      cube.position.set((Math.random() - 0.5) * 20, (Math.random() - 0.5) * 12, -5 - Math.random() * 40);
+      cube.position.set((Math.random() - 0.5) * 28, (Math.random() - 0.5) * 16, -5 - Math.random() * 50);
       this.game.ship.mesh.add(cube);
       this.debris.push(cube);
     }
+
+    // Heat shield ring (blocky torus approximation)
+    this.heatRing = new THREE.Group();
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      const b = new THREE.Mesh(
+        new THREE.BoxGeometry(0.6, 0.25, 0.6),
+        new THREE.MeshBasicMaterial({
+          color: 0xff8020,
+          transparent: true,
+          opacity: 0.7,
+        })
+      );
+      b.position.set(Math.cos(a) * 3.5, Math.sin(a) * 2.2, 2);
+      this.heatRing.add(b);
+    }
+    this.game.ship.mesh.add(this.heatRing);
 
     sound.atmosphereEntry();
   }
@@ -112,6 +129,11 @@ export class PlanetEntry {
       }
     }
 
+    if (this.heatRing) {
+      this.heatRing.rotation.z += dt * 3;
+      this.heatRing.scale.setScalar(1 + Math.sin(this.timer * 8) * 0.08);
+    }
+
     // Screen flash intensity via overlay CSS already animating
 
     if (this.timer >= this.duration) {
@@ -140,6 +162,10 @@ export class PlanetEntry {
       d.material.dispose();
     }
     this.debris = [];
+    if (this.heatRing) {
+      this.game.ship.mesh.remove(this.heatRing);
+      this.heatRing = null;
+    }
 
     const planet = this.targetPlanet.def;
     this.game.landOnPlanet(planet, true);

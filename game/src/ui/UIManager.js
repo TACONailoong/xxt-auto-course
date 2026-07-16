@@ -1,4 +1,4 @@
-import { ITEMS, RECIPES } from '../core/constants.js';
+import { ITEMS, RECIPES, BLOCK_NAMES } from '../core/constants.js';
 import { getUnlockedRecipes } from '../systems/Inventory.js';
 import { sound } from '../audio/SoundManager.js';
 
@@ -79,6 +79,7 @@ export class UIManager {
     this.refreshResources();
     this.refreshHotbar();
     this.refreshShipHud();
+    this.refreshTargetInfo();
   }
 
   refreshShipHud() {
@@ -93,6 +94,23 @@ export class UIManager {
     document.getElementById('sys-pulse').classList.toggle('broken', !ship.pulseEngine.repaired);
     document.getElementById('sys-launch').classList.toggle('broken', !ship.launchThruster.repaired);
     document.getElementById('alt-value').textContent = Math.round(ship.position.y);
+  }
+
+  refreshTargetInfo() {
+    const el = document.getElementById('target-info');
+    if (!el) return;
+    if (this.game.mode !== 'planet' || !this.game.player?.targetBlock) {
+      el.classList.add('hidden');
+      return;
+    }
+    const { id } = this.game.player.targetBlock;
+    const name = BLOCK_NAMES[id];
+    if (!name) {
+      el.classList.add('hidden');
+      return;
+    }
+    el.classList.remove('hidden');
+    el.textContent = name;
   }
 
   setInteract(text) {

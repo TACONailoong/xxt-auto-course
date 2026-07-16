@@ -146,7 +146,9 @@ export const MISSION_STAGES = [
         g.inventory.remove('ferrite_dust', 75);
       }
       g.flags.scannerRepaired = true;
-      g.log('扫描器已修复。按 R 搜索坠毁星舰信号…');
+      g.flags.scannedShip = true;
+      if (g.shipMarker) g.shipMarker.visible = true;
+      g.log('扫描器已修复。星舰信号已标定 — 前往橙色标记。');
     },
     progress: (g) => `铁尘 ${Math.min(75, g.inventory.count('ferrite_dust'))}/75`,
   },
@@ -194,7 +196,7 @@ export const MISSION_STAGES = [
     },
     progress: (g) => {
       if (g.inventory.has('hermetic_seal', 1)) return '返回星舰安装密封环';
-      if (g.flags.beaconRead) return '前往黄色信标 — 废弃建筑';
+      if (g.flags.beaconRead) return '前往青色标记 — 废弃建筑';
       return '调查星舰旁的求救信标';
     },
   },

@@ -136,18 +136,29 @@ export class PlayerController {
     const { x, y, z, id } = this.targetBlock;
     if (id === BLOCKS.AIR || id === BLOCKS.BEDROCK) return null;
     this.world.setBlock(x, y, z, BLOCKS.AIR);
-    this.mineCooldown = 0.22;
+    this.mineCooldown = 0.2;
     const hard = id === BLOCKS.STONE || id === BLOCKS.FERRITE_ROCK || id === BLOCKS.COPPER_ORE;
     sound.mine(hard);
     const drop = BLOCK_DROPS[id];
+    let result = { x, y, z, id, item: null, qty: 0 };
     if (drop) {
       const [lo, hi] = drop.amount;
       const qty = lo + Math.floor(Math.random() * (hi - lo + 1));
       inventory.add(drop.item, qty);
       sound.collect();
-      return { item: drop.item, qty };
+      result.item = drop.item;
+      result.qty = qty;
     }
-    return { item: null, qty: 0 };
+    return result;
+  }
+
+  getMineTargetPoint() {
+    if (!this.targetBlock) return null;
+    return new THREE.Vector3(
+      this.targetBlock.x + 0.5,
+      this.targetBlock.y + 0.5,
+      this.targetBlock.z + 0.5
+    );
   }
 
   _moveAxis(dt, axis) {

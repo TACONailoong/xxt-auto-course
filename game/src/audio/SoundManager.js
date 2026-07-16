@@ -214,6 +214,17 @@ export class SoundManager {
     }
   }
 
+  stormAmbience() {
+    this._noise(0.4, 0.12, 200);
+    this._tone(60, 0.3, 'sawtooth', 0.06);
+  }
+
+  beamHum() {
+    if (!this.ctx || !this.enabled) return;
+    if (Math.random() > 0.3) return;
+    this._tone(900 + Math.random() * 400, 0.04, 'sawtooth', 0.04);
+  }
+
   missionComplete() {
     [523, 659, 784, 1046].forEach((f, i) => {
       setTimeout(() => this._tone(f, 0.25, 'triangle', 0.14), i * 120);

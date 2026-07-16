@@ -63,8 +63,15 @@ export class VoxelWorld {
     return Math.floor(base + n * 14);
   }
 
+  waterLevel() {
+    if (this.biome === 'desert') return 0;
+    if (this.biome === 'frozen') return 17;
+    return 16;
+  }
+
   generateChunkData(cx, cz) {
     const data = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE * WORLD_H);
+    const waterY = this.waterLevel();
     for (let lz = 0; lz < CHUNK_SIZE; lz++) {
       for (let lx = 0; lx < CHUNK_SIZE; lx++) {
         const wx = cx * CHUNK_SIZE + lx;
@@ -77,17 +84,22 @@ export class VoxelWorld {
             id = BLOCKS.STONE;
             if (noise2D(wx * 0.2, wz * 0.2 + y * 0.15, this.seed + 9) > 0.84) id = BLOCKS.COPPER_ORE;
           } else if (y < h - 1) id = BLOCKS.DIRT;
-          else if (y === h - 1 || y === h) {
-            if (this.biome === 'desert') id = BLOCKS.SAND;
+          else if (y <= h) {
+            if (h < waterY) id = BLOCKS.SAND;
+            else if (this.biome === 'desert') id = BLOCKS.SAND;
             else if (this.biome === 'frozen') id = BLOCKS.STONE;
             else id = BLOCKS.GRASS;
+          }
+          // Fill water in valleys
+          if (id === BLOCKS.AIR && waterY > 0 && y <= waterY && y > h) {
+            id = BLOCKS.WATER;
           }
           data[lx + lz * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = id;
         }
 
-        // Surface decorations (only on top of surface)
+        // Surface decorations (skip underwater)
         const top = h + 1;
-        if (top < WORLD_H) {
+        if (top < WORLD_H && h >= waterY) {
           const r = noise2D(wx * 0.37, wz * 0.37, this.seed + 3);
           let decor = BLOCKS.AIR;
           if (r > 0.86) decor = BLOCKS.FERRITE_ROCK;
@@ -96,7 +108,6 @@ export class VoxelWorld {
           else if (r > 0.70) decor = BLOCKS.DIHYDROGEN;
           else if (r > 0.685) decor = BLOCKS.CRYSTAL;
           else if (r > 0.66 && this.biome === 'lush') {
-            // Simple tree: trunk + canopy
             const treeH = 3 + Math.floor(noise2D(wx, wz, this.seed + 5) * 2);
             for (let t = 0; t < treeH; t++) {
               if (top + t < WORLD_H) data[lx + lz * CHUNK_SIZE + (top + t) * CHUNK_SIZE * CHUNK_SIZE] = BLOCKS.LOG;
@@ -156,7 +167,7 @@ export class VoxelWorld {
       for (let lz = 0; lz < CHUNK_SIZE; lz++) {
         for (let lx = 0; lx < CHUNK_SIZE; lx++) {
           const id = data[lx + lz * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE];
-          if (id === BLOCKS.AIR || id === BLOCKS.WATER) continue;
+          if (id === BLOCKS.AIR) continue;
           const baseColor = new THREE.Color(BLOCK_COLORS[id] || 0xffffff);
           // slight per-block variation
           const v = 0.92 + noise2D(cx * 16 + lx, cz * 16 + lz + y, 1) * 0.16;
@@ -167,9 +178,15 @@ export class VoxelWorld {
             const ny = y + face.d[1];
             const nz = lz + face.d[2];
             const neighbor = get(nx, ny, nz);
-            if (neighbor !== BLOCKS.AIR && neighbor !== BLOCKS.WATER) continue;
+            // Water only renders against air; solids render against air/water
+            if (id === BLOCKS.WATER) {
+              if (neighbor !== BLOCKS.AIR) continue;
+            } else if (neighbor !== BLOCKS.AIR && neighbor !== BLOCKS.WATER) {
+              continue;
+            }
 
             const shade = face.n[1] > 0 ? 1 : face.n[1] < 0 ? 0.45 : face.n[0] !== 0 ? 0.7 : 0.85;
+            const alphaMul = id === BLOCKS.WATER ? 0.75 : 1;
             for (const vert of face.verts) {
               positions.push(
                 cx * CHUNK_SIZE + lx + vert[0],
@@ -177,7 +194,7 @@ export class VoxelWorld {
                 cz * CHUNK_SIZE + lz + vert[2]
               );
               normals.push(...face.n);
-              colors.push(col.r * shade, col.g * shade, col.b * shade);
+              colors.push(col.r * shade * alphaMul, col.g * shade * alphaMul, col.b * shade * alphaMul);
             }
             indices.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3);
             vi += 4;

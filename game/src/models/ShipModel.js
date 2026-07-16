@@ -29,55 +29,72 @@ export function createStarship(options = {}) {
   };
 
   // Main fuselage — stepped voxel look
-  box(1.2, 0.7, 3.2, palette.hull, 0, 0.4, 0);
-  box(0.9, 0.5, 1.4, palette.dark, 0, 0.75, -0.2); // cockpit ridge
-  box(0.7, 0.35, 0.8, palette.glass, 0, 0.85, 0.9); // canopy
+  box(1.4, 0.75, 3.6, palette.hull, 0, 0.45, 0);
+  box(1.0, 0.55, 1.6, palette.dark, 0, 0.85, -0.15);
+  box(0.75, 0.38, 0.9, palette.glass, 0, 0.95, 1.0);
 
-  // Nose
-  box(0.7, 0.45, 0.8, palette.accent, 0, 0.35, 1.8);
-  box(0.4, 0.3, 0.5, palette.hull, 0, 0.3, 2.3);
+  // Side armor plates
+  box(0.15, 0.5, 2.2, palette.accent, 0.75, 0.45, 0.1);
+  box(0.15, 0.5, 2.2, palette.accent, -0.75, 0.45, 0.1);
+
+  // Nose — stepped
+  box(0.85, 0.5, 0.9, palette.accent, 0, 0.4, 2.0);
+  box(0.55, 0.35, 0.55, palette.hull, 0, 0.35, 2.55);
+  box(0.3, 0.2, 0.35, palette.dark, 0, 0.3, 2.9);
 
   // Wings — angular NMS-like with blocky voxels
-  box(2.8, 0.12, 1.0, palette.hull, 0, 0.25, -0.3);
-  box(0.5, 0.15, 1.2, palette.accent, 1.5, 0.28, -0.2);
-  box(0.5, 0.15, 1.2, palette.accent, -1.5, 0.28, -0.2);
-  box(0.8, 0.1, 0.6, palette.dark, 1.8, 0.22, -0.8);
-  box(0.8, 0.1, 0.6, palette.dark, -1.8, 0.22, -0.8);
+  box(3.4, 0.14, 1.2, palette.hull, 0, 0.28, -0.2);
+  box(0.7, 0.18, 1.4, palette.accent, 1.7, 0.32, -0.15);
+  box(0.7, 0.18, 1.4, palette.accent, -1.7, 0.32, -0.15);
+  box(1.0, 0.12, 0.7, palette.dark, 2.1, 0.25, -0.9);
+  box(1.0, 0.12, 0.7, palette.dark, -2.1, 0.25, -0.9);
+  // Wing tip lights
+  const tipL = box(0.2, 0.2, 0.2, 0xff4040, 2.5, 0.35, -0.3);
+  const tipR = box(0.2, 0.2, 0.2, 0x40ff80, -2.5, 0.35, -0.3);
+  tipL.material.emissive = new THREE.Color(0xff2020);
+  tipL.material.emissiveIntensity = 0.9;
+  tipR.material.emissive = new THREE.Color(0x20ff60);
+  tipR.material.emissiveIntensity = 0.9;
 
   // Vertical stabilizers
-  box(0.1, 0.7, 0.6, palette.accent, 0.35, 0.9, -1.2);
-  box(0.1, 0.7, 0.6, palette.accent, -0.35, 0.9, -1.2);
+  box(0.12, 0.9, 0.7, palette.accent, 0.4, 1.05, -1.35);
+  box(0.12, 0.9, 0.7, palette.accent, -0.4, 1.05, -1.35);
+  box(0.08, 0.5, 0.4, palette.dark, 0, 1.15, -1.6);
 
-  // Engines
-  const engL = box(0.45, 0.45, 0.9, palette.dark, 0.7, 0.3, -1.7);
-  const engR = box(0.45, 0.45, 0.9, palette.dark, -0.7, 0.3, -1.7);
-  const glowL = box(0.3, 0.3, 0.15, palette.engine, 0.7, 0.3, -2.2);
-  const glowR = box(0.3, 0.3, 0.15, palette.engine, -0.7, 0.3, -2.2);
+  // Engines — twin cluster
+  box(0.5, 0.5, 1.0, palette.dark, 0.75, 0.32, -1.85);
+  box(0.5, 0.5, 1.0, palette.dark, -0.75, 0.32, -1.85);
+  box(0.35, 0.35, 0.6, palette.hull, 0, 0.28, -1.9);
+  const glowL = box(0.35, 0.35, 0.18, palette.engine, 0.75, 0.32, -2.4);
+  const glowR = box(0.35, 0.35, 0.18, palette.engine, -0.75, 0.32, -2.4);
+  const glowC = box(0.22, 0.22, 0.12, palette.engine, 0, 0.28, -2.25);
   glowL.material.emissive = new THREE.Color(palette.engine);
-  glowL.material.emissiveIntensity = 0.8;
+  glowL.material.emissiveIntensity = 0.9;
   glowR.material.emissive = new THREE.Color(palette.engine);
-  glowR.material.emissiveIntensity = 0.8;
+  glowR.material.emissiveIntensity = 0.9;
+  glowC.material.emissive = new THREE.Color(palette.engine);
+  glowC.material.emissiveIntensity = 0.7;
 
   // Underside landing gear blocks
-  box(0.2, 0.35, 0.2, palette.dark, 0.5, -0.05, 0.6);
-  box(0.2, 0.35, 0.2, palette.dark, -0.5, -0.05, 0.6);
-  box(0.2, 0.25, 0.2, palette.dark, 0, -0.02, -1.0);
+  box(0.22, 0.4, 0.22, palette.dark, 0.55, -0.05, 0.7);
+  box(0.22, 0.4, 0.22, palette.dark, -0.55, -0.05, 0.7);
+  box(0.22, 0.3, 0.22, palette.dark, 0, 0.0, -1.1);
 
   if (options.damaged) {
-    box(0.4, 0.3, 0.5, 0x4a2020, 0.6, 0.6, 0.2);
-    box(0.3, 0.2, 0.4, 0x3a1818, -0.5, 0.2, -0.5);
-    // smoke marker light
-    const smoke = new THREE.PointLight(0xff6020, 0.6, 8);
-    smoke.position.set(0.5, 1.2, 0);
+    box(0.5, 0.35, 0.55, 0x4a2020, 0.65, 0.7, 0.25);
+    box(0.35, 0.25, 0.45, 0x3a1818, -0.55, 0.25, -0.55);
+    box(0.25, 0.2, 0.3, 0x2a1010, 0.3, 0.15, 1.2);
+    const smoke = new THREE.PointLight(0xff6020, 0.9, 12);
+    smoke.position.set(0.5, 1.4, 0);
     group.add(smoke);
   }
 
   // Engine light
-  const engineLight = new THREE.PointLight(palette.engine, 0, 12);
-  engineLight.position.set(0, 0.3, -2.4);
+  const engineLight = new THREE.PointLight(palette.engine, 0, 14);
+  engineLight.position.set(0, 0.3, -2.6);
   group.add(engineLight);
   group.userData.engineLight = engineLight;
-  group.userData.glows = [glowL, glowR];
+  group.userData.glows = [glowL, glowR, glowC];
 
   group.scale.setScalar(options.scale || 1.2);
   return group;
