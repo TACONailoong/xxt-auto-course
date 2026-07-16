@@ -1,0 +1,5 @@
+node_modules/
+tests/browsers/
+tests/fixtures/*.webm
+.DS_Store
+*.log

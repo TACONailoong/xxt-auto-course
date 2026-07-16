@@ -1,0 +1,15 @@
+{
+  "name": "xuexitong-auto-player",
+  "version": "1.2.0",
+  "private": true,
+  "description": "学习通自动刷课浏览器扩展",
+  "scripts": {
+    "test:prepare": "mkdir -p tests/fixtures tests/browsers && (test -f tests/fixtures/test.webm || ffmpeg -y -f lavfi -i testsrc=duration=30:size=320x240:rate=10 -c:v libvpx -an tests/fixtures/test.webm) && (test -d tests/browsers/chromium && echo chromium-ok || npx --yes @puppeteer/browsers install chromium@latest --path tests/browsers)",
+    "test:server": "node tests/mock-server.js",
+    "test:e2e": "node tests/e2e.js",
+    "test": "npm run test:prepare && node tests/run.js"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^24.0.0"
+  }
+}

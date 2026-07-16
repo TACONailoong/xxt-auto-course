@@ -1,17 +1,19 @@
 {
   "manifest_version": 3,
   "name": "学习通自动刷课助手",
-  "version": "1.1.0",
-  "description": "自动播放学习通视频课程，支持倍速播放和自动答题",
+  "version": "1.2.0",
+  "description": "自动播放学习通视频课程，支持倍速、静音、弹窗答题、跳过测验与自动切章",
   "permissions": [
     "storage"
   ],
   "host_permissions": [
     "*://*.chaoxing.com/*",
-    "*://*.fx361.com/*"
+    "*://*.fx361.com/*",
+    "*://*.edu.cn/*"
   ],
   "action": {
     "default_popup": "popup.html",
+    "default_title": "学习通自动刷课助手",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -22,9 +24,13 @@
     {
       "matches": [
         "*://*.chaoxing.com/*",
-        "*://*.fx361.com/*"
+        "*://*.fx361.com/*",
+        "*://*.edu.cn/*"
       ],
-      "js": ["content.js"],
+      "js": [
+        "shared/defaults.js",
+        "content.js"
+      ],
       "run_at": "document_end",
       "all_frames": true,
       "match_about_blank": true

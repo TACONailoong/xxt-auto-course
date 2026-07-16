@@ -5,16 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>学习通自动刷课助手</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-      width: 320px;
-      padding: 20px;
+      width: 340px;
+      padding: 16px;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: #333;
     }
@@ -22,25 +18,40 @@
     .container {
       background: white;
       border-radius: 16px;
-      padding: 24px;
+      padding: 20px;
       box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
     }
 
-    .header {
-      text-align: center;
-      margin-bottom: 24px;
-    }
+    .header { text-align: center; margin-bottom: 18px; }
 
     .header h1 {
-      font-size: 18px;
+      font-size: 17px;
       font-weight: 600;
       color: #1a1a2e;
       margin-bottom: 4px;
     }
 
-    .header p {
-      font-size: 12px;
-      color: #666;
+    .header p { font-size: 12px; color: #666; }
+
+    .live-status {
+      margin-top: 12px;
+      padding: 10px 12px;
+      background: #f8fafc;
+      border-radius: 10px;
+      text-align: left;
+    }
+
+    .live-status .label {
+      font-size: 11px;
+      color: #94a3b8;
+      margin-bottom: 4px;
+    }
+
+    .live-status .value {
+      font-size: 13px;
+      font-weight: 500;
+      color: #1a1a2e;
+      line-height: 1.4;
     }
 
     .status-indicator {
@@ -48,7 +59,7 @@
       align-items: center;
       justify-content: center;
       gap: 8px;
-      margin-top: 12px;
+      margin-top: 10px;
     }
 
     .status-dot {
@@ -64,34 +75,35 @@
       box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
     }
 
-    .status-text {
-      font-size: 13px;
-      font-weight: 500;
-    }
+    .status-text { font-size: 13px; font-weight: 500; }
+    .status-text.active { color: #10b981; }
 
-    .status-text.active {
-      color: #10b981;
-    }
-
-    .control-group {
-      margin-bottom: 20px;
-    }
+    .control-group { margin-bottom: 14px; }
 
     .control-label {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 8px;
+      gap: 12px;
     }
 
-    .control-label span {
+    .control-label .text { flex: 1; }
+    .control-label .title {
       font-size: 14px;
       font-weight: 500;
       color: #1a1a2e;
+      display: block;
+    }
+    .control-label .desc {
+      font-size: 11px;
+      color: #94a3b8;
+      margin-top: 2px;
+      display: block;
     }
 
     .toggle-switch {
       position: relative;
+      flex-shrink: 0;
       width: 48px;
       height: 26px;
       background: #e5e7eb;
@@ -100,9 +112,7 @@
       transition: all 0.3s ease;
     }
 
-    .toggle-switch.active {
-      background: #10b981;
-    }
+    .toggle-switch.active { background: #10b981; }
 
     .toggle-switch::after {
       content: '';
@@ -117,18 +127,12 @@
       box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
     }
 
-    .toggle-switch.active::after {
-      transform: translateX(22px);
-    }
+    .toggle-switch.active::after { transform: translateX(22px); }
 
-    .speed-control {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
+    .speed-control { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
 
     .speed-value {
-      font-size: 24px;
+      font-size: 22px;
       font-weight: 600;
       color: #667eea;
       text-align: center;
@@ -152,21 +156,12 @@
       border-radius: 50%;
       cursor: pointer;
       box-shadow: 0 2px 6px rgba(102, 126, 234, 0.4);
-      transition: transform 0.2s ease;
     }
 
-    .speed-slider::-webkit-slider-thumb:hover {
-      transform: scale(1.1);
-    }
-
-    .speed-presets {
-      display: flex;
-      gap: 8px;
-      justify-content: center;
-    }
+    .speed-presets { display: flex; gap: 8px; justify-content: center; }
 
     .preset-btn {
-      padding: 6px 14px;
+      padding: 6px 12px;
       background: #f3f4f6;
       border: none;
       border-radius: 8px;
@@ -177,43 +172,34 @@
       transition: all 0.2s ease;
     }
 
-    .preset-btn:hover {
-      background: #e5e7eb;
-    }
+    .preset-btn:hover { background: #e5e7eb; }
 
     .preset-btn.active {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
     }
 
-    .divider {
-      height: 1px;
-      background: #e5e7eb;
-      margin: 20px 0;
-    }
+    .divider { height: 1px; background: #e5e7eb; margin: 16px 0; }
 
     .tips {
       background: #f8fafc;
       border-radius: 10px;
-      padding: 14px;
-      margin-bottom: 20px;
+      padding: 12px;
+      margin-bottom: 12px;
     }
 
     .tips h3 {
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 600;
       color: #1a1a2e;
-      margin-bottom: 8px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      margin-bottom: 6px;
     }
 
     .tips ul {
       list-style: none;
-      font-size: 12px;
+      font-size: 11px;
       color: #666;
-      line-height: 1.8;
+      line-height: 1.7;
     }
 
     .tips li::before {
@@ -228,76 +214,81 @@
       color: #999;
     }
 
-    .save-btn {
-      width: 100%;
-      padding: 12px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      border: none;
-      border-radius: 10px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.3s ease;
-      margin-bottom: 12px;
-    }
-
-    .save-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
-    }
-
-    .save-btn:active {
-      transform: translateY(0);
-    }
-
-    .notification {
-      position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 500;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-      z-index: 10000;
+    .save-hint {
+      text-align: center;
+      font-size: 11px;
+      color: #10b981;
+      min-height: 16px;
+      margin-bottom: 8px;
       opacity: 0;
-      transition: opacity 0.3s ease, transform 0.3s ease;
-      pointer-events: none;
-      white-space: nowrap;
+      transition: opacity 0.2s ease;
     }
 
-    .notification.show {
-      opacity: 1;
-      transform: translateX(-50%) translateY(4px);
-    }
+    .save-hint.show { opacity: 1; }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
       <h1>学习通自动刷课助手</h1>
-      <p>自动播放 · 倍速调节 · 智能答题</p>
+      <p>自动播放 · 倍速 · 答题 · 切章</p>
       <div class="status-indicator">
         <div class="status-dot" id="statusDot"></div>
         <span class="status-text" id="statusText">插件已停止</span>
+      </div>
+      <div class="live-status">
+        <div class="label">页面状态</div>
+        <div class="value" id="liveDetail">尚未检测到课程页，请打开学习通课程后查看</div>
       </div>
     </div>
 
     <div class="control-group">
       <div class="control-label">
-        <span>开启自动刷课</span>
+        <div class="text">
+          <span class="title">开启自动刷课</span>
+          <span class="desc">播放、续播、切章总开关</span>
+        </div>
         <div class="toggle-switch" id="toggleAuto"></div>
       </div>
     </div>
 
     <div class="control-group">
       <div class="control-label">
-        <span>自动答题</span>
+        <div class="text">
+          <span class="title">自动答题</span>
+          <span class="desc">视频弹窗题随机作答</span>
+        </div>
         <div class="toggle-switch" id="toggleAnswer"></div>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <div class="control-label">
+        <div class="text">
+          <span class="title">静音播放</span>
+          <span class="desc">提高自动播放成功率</span>
+        </div>
+        <div class="toggle-switch" id="toggleMute"></div>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <div class="control-label">
+        <div class="text">
+          <span class="title">跳过章节测验</span>
+          <span class="desc">遇到测验页自动进下一节</span>
+        </div>
+        <div class="toggle-switch" id="toggleSkipQuiz"></div>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <div class="control-label">
+        <div class="text">
+          <span class="title">自动下一节</span>
+          <span class="desc">视频/任务完成后继续</span>
+        </div>
+        <div class="toggle-switch" id="toggleAutoNext"></div>
       </div>
     </div>
 
@@ -305,7 +296,9 @@
 
     <div class="control-group">
       <div class="control-label">
-        <span>播放倍速</span>
+        <div class="text">
+          <span class="title">播放倍速</span>
+        </div>
       </div>
       <div class="speed-control">
         <div class="speed-value" id="speedValue">1.5x</div>
@@ -322,27 +315,20 @@
     <div class="divider"></div>
 
     <div class="tips">
-      <h3>
-        <span>💡</span> 使用提示
-      </h3>
+      <h3>使用提示</h3>
       <ul>
-        <li>打开学习通课程页面后点击开启</li>
-        <li>设置修改后立即生效，无需刷新</li>
-        <li>自动答题会随机选择答案，仅供参考</li>
-        <li>倍速过高可能被平台判定无效</li>
-        <li>视频结束后会自动切换下一章</li>
+        <li>打开学习通课程播放页即可自动工作</li>
+        <li>设置修改后立即生效，无需点保存</li>
+        <li>页面右下角有运行状态浮层</li>
+        <li>自动答题为随机选择，重要题请手动作答</li>
       </ul>
     </div>
 
-    <button class="save-btn" id="saveBtn">保存设置</button>
-
-    <div class="footer">
-      版本 1.1.0 · 仅供学习交流使用
-    </div>
+    <div class="save-hint" id="saveHint">已自动保存</div>
+    <div class="footer">版本 1.2.0 · 仅供学习交流使用</div>
   </div>
 
-  <div class="notification" id="notification"></div>
-
+  <script src="shared/defaults.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
