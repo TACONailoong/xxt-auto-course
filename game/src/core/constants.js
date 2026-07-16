@@ -55,16 +55,17 @@ export const BLOCK_NAMES = {
 
 /** Drop tables when mining */
 export const BLOCK_DROPS = {
-  [BLOCKS.STONE]: { item: 'ferrite_dust', amount: [2, 5] },
+  [BLOCKS.STONE]: { item: 'ferrite_dust', amount: [2, 5], also: { item: 'block_stone', qty: 1 } },
   [BLOCKS.FERRITE_ROCK]: { item: 'ferrite_dust', amount: [8, 14] },
   [BLOCKS.SODIUM_PLANT]: { item: 'sodium', amount: [5, 12] },
   [BLOCKS.CARBON_PLANT]: { item: 'carbon', amount: [6, 14] },
-  [BLOCKS.LOG]: { item: 'carbon', amount: [4, 8] },
+  [BLOCKS.LOG]: { item: 'carbon', amount: [4, 8], also: { item: 'block_log', qty: 1 } },
   [BLOCKS.LEAVES]: { item: 'oxygen', amount: [2, 5] },
   [BLOCKS.DIHYDROGEN]: { item: 'dihydrogen', amount: [8, 15] },
   [BLOCKS.COPPER_ORE]: { item: 'copper', amount: [5, 10] },
-  [BLOCKS.DIRT]: { item: 'ferrite_dust', amount: [1, 2] },
-  [BLOCKS.GRASS]: { item: 'carbon', amount: [1, 2] },
+  [BLOCKS.DIRT]: { item: 'block_dirt', amount: [1, 1] },
+  [BLOCKS.GRASS]: { item: 'carbon', amount: [1, 2], also: { item: 'block_dirt', qty: 1 } },
+  [BLOCKS.SAND]: { item: 'block_sand', amount: [1, 1] },
   [BLOCKS.CRYSTAL]: { item: 'dihydrogen', amount: [12, 20] },
 };
 
@@ -83,6 +84,11 @@ export const ITEMS = {
   carbon_nanotubes: { id: 'carbon_nanotubes', name: '碳纳米管', icon: '≡', color: '#5a8a5a' },
   portable_refiner: { id: 'portable_refiner', name: '便携精炼机', icon: '⚙', color: '#e8a832' },
   launch_fuel: { id: 'launch_fuel', name: '发射燃料', icon: '▲', color: '#ff8040' },
+  hyperdrive_core: { id: 'hyperdrive_core', name: '超空间核心', icon: '✧', color: '#e060ff' },
+  block_dirt: { id: 'block_dirt', name: '泥土块', icon: '▢', color: '#6b4423', place: 2 },
+  block_stone: { id: 'block_stone', name: '岩石块', icon: '▢', color: '#6e737a', place: 3 },
+  block_sand: { id: 'block_sand', name: '沙块', icon: '▢', color: '#c2b280', place: 4 },
+  block_log: { id: 'block_log', name: '原木块', icon: '▢', color: '#5c3a1e', place: 5 },
 };
 
 export const RECIPES = [
@@ -132,6 +138,37 @@ export const RECIPES = [
     unlock: 'flight',
     desc: '补充发射推进燃料',
   },
+  {
+    id: 'chromatic_metal',
+    name: '色谱金属',
+    result: { item: 'chromatic_metal', qty: 1 },
+    cost: [
+      { item: 'copper', qty: 40 },
+      { item: 'pure_ferrite', qty: 20 },
+    ],
+    unlock: 'hyperdrive',
+    desc: '提炼超空间引擎材料',
+  },
+  {
+    id: 'hyperdrive_core',
+    name: '超空间核心',
+    result: { item: 'hyperdrive_core', qty: 1 },
+    cost: [
+      { item: 'chromatic_metal', qty: 3 },
+      { item: 'carbon_nanotubes', qty: 1 },
+    ],
+    unlock: 'hyperdrive',
+    desc: '安装到星舰以完成超空间校准',
+  },
+];
+
+/** Galactic trade offers (Units sink) */
+export const TRADE_OFFERS = [
+  { id: 'buy_fuel', name: '发射燃料', cost: 900, give: { item: 'launch_fuel', qty: 1 } },
+  { id: 'buy_sodium', name: '钠×20', cost: 450, give: { item: 'sodium', qty: 20 } },
+  { id: 'buy_oxygen', name: '氧×20', cost: 400, give: { item: 'oxygen', qty: 20 } },
+  { id: 'buy_dih', name: '双氢×25', cost: 550, give: { item: 'dihydrogen', qty: 25 } },
+  { id: 'buy_plating', name: '金属镀层', cost: 1200, give: { item: 'metal_plating', qty: 1 } },
 ];
 
 /** Mission stages mirroring NMS Awakenings early flow */
@@ -140,17 +177,20 @@ export const MISSION_STAGES = [
     id: 'awaken',
     title: '觉醒',
     objective: '我在陌生星球醒来。采集铁尘修复扫描器。',
-    check: (g) => g.inventory.count('ferrite_dust') >= 75,
+    check: (g) => g.flags.scannerRepaired || g.inventory.count('ferrite_dust') >= 75,
     onComplete: (g) => {
-      if (g.inventory.count('ferrite_dust') >= 75) {
+      if (!g.flags.scannerRepaired) {
         g.inventory.remove('ferrite_dust', 75);
+        g.flags.scannerRepaired = true;
       }
-      g.flags.scannerRepaired = true;
       g.flags.scannedShip = true;
       if (g.shipMarker) g.shipMarker.visible = true;
       g.log('扫描器已修复。星舰信号已标定 — 前往橙色标记。');
     },
-    progress: (g) => `铁尘 ${Math.min(75, g.inventory.count('ferrite_dust'))}/75`,
+    progress: (g) =>
+      g.flags.scannerRepaired
+        ? '扫描器已修复'
+        : `铁尘 ${Math.min(75, g.inventory.count('ferrite_dust'))}/75`,
   },
   {
     id: 'find_ship',
@@ -232,17 +272,34 @@ export const MISSION_STAGES = [
     objective: '在太空中飞行，接近另一颗行星并进入大气层。',
     check: (g) => g.flags.enteredSecondPlanet,
     onComplete: (g) => {
-      g.log('信号源在此。探索这颗方块世界，建立你的航迹。');
+      g.log('异星大气。外骨骼检测到铜矿与超空间信号残响。');
+      g.flags.unlockedHyperdrive = true;
     },
     progress: () => '飞向标记行星 · 俯冲进入大气',
   },
   {
+    id: 'chromatic',
+    title: '超空间校准',
+    objective: '采集铜矿，制作色谱金属与超空间核心，安装到星舰。',
+    check: (g) => g.flags.hyperdriveInstalled,
+    onComplete: (g) => {
+      g.log('超空间核心在线。深空脉冲加速已解锁（Shift）。继续探索方块宇宙。');
+    },
+    progress: (g) => {
+      if (g.inventory.has('hyperdrive_core', 1) || g.flags.hyperdriveInstalled) {
+        return '打开星舰面板安装超空间核心';
+      }
+      if (g.inventory.count('chromatic_metal') >= 3) return '制作超空间核心（需碳纳米管）';
+      return `铜 ${g.inventory.count('copper')}/40 · 按 C 提炼色谱金属`;
+    },
+  },
+  {
     id: 'free',
     title: '无尽航迹',
-    objective: '自由探索方块宇宙。采集、建造、与其他旅行者相遇。',
+    objective: '自由探索。右键放置方块，Units 可在废弃终端交易，与其他旅行者相遇。',
     check: () => false,
     onComplete: () => {},
-    progress: () => 'WASD 飞行 · F 降落 · R 扫描',
+    progress: () => '右键放置 · E 交易 · WASD 飞行',
   },
 ];
 

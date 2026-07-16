@@ -35,6 +35,9 @@ export class ShipController {
       hasFerrite: false,
       fuel: 0,
     };
+    this.hyperdrive = {
+      installed: false,
+    };
 
     this.keys = {};
   }
@@ -97,6 +100,37 @@ export class ShipController {
     return true;
   }
 
+  tryInstallHyperdrive(inventory) {
+    if (this.hyperdrive.installed) return false;
+    if (!inventory.has('hyperdrive_core', 1)) return false;
+    inventory.remove('hyperdrive_core', 1);
+    this.hyperdrive.installed = true;
+    sound.shipRepair();
+    return true;
+  }
+
+  /** Refuel launch thruster from launch_fuel item (+45%) */
+  tryRefuelLaunch(inventory) {
+    if (!this.launchThruster.repaired) return false;
+    if (this.launchThruster.fuel >= 99) return false;
+    if (!inventory.has('launch_fuel', 1)) return false;
+    inventory.remove('launch_fuel', 1);
+    this.launchThruster.fuel = Math.min(100, this.launchThruster.fuel + 45);
+    sound.collect();
+    return true;
+  }
+
+  /** Refuel pulse from dihydrogen (+35%) */
+  tryRefuelPulse(inventory) {
+    if (!this.pulseEngine.repaired) return false;
+    if (this.pulseEngine.fuel >= 99) return false;
+    if (!inventory.has('dihydrogen', 25)) return false;
+    inventory.remove('dihydrogen', 25);
+    this.pulseEngine.fuel = Math.min(100, this.pulseEngine.fuel + 35);
+    sound.collect();
+    return true;
+  }
+
   _checkPulse() {
     if (this.pulseEngine.hasPlating && this.pulseEngine.hasSeal) {
       this.pulseEngine.repaired = true;
@@ -126,21 +160,21 @@ export class ShipController {
   _flyAtmosphere(dt, camera) {
     if (!this.repaired) return null;
 
-    const boost = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
+    const wantBoost = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
+    const wantLift = this.keys['Space'] ? 1 : this.keys['ControlLeft'] ? -0.7 : 0;
+    const canLift = wantLift <= 0 || this.launchThruster.fuel > 0.5;
+    const canBoost = wantBoost && this.pulseEngine.fuel > 0.5;
     const throttle = this.keys['KeyW'] ? 1 : this.keys['KeyS'] ? -0.35 : 0.05;
-    const lift = this.keys['Space'] ? 1 : this.keys['ControlLeft'] ? -0.7 : 0;
+    const lift = canLift ? wantLift : Math.min(0, wantLift);
     const turn = (this.keys['KeyA'] ? 1 : 0) + (this.keys['KeyD'] ? -1 : 0);
 
-    // Keyboard assist turn + mouse already sets yaw/pitch from Game
     this.yaw += turn * 1.6 * dt;
     this.pitch = THREE.MathUtils.clamp(this.pitch, -1.15, 0.9);
 
-    // Banking
-    this.targetRoll = turn * 0.45 + (boost ? 0 : 0);
-    // Also bank from mouse yaw change approx via A/D
+    this.targetRoll = turn * 0.45;
     this.roll = THREE.MathUtils.damp(this.roll, this.targetRoll, 6, dt);
 
-    const targetSpeed = throttle * (boost ? 62 : 36);
+    const targetSpeed = throttle * (canBoost ? 62 : 36);
     this.speed = THREE.MathUtils.damp(this.speed, targetSpeed, 4, dt);
 
     const forward = new THREE.Vector3(
@@ -155,16 +189,22 @@ export class ShipController {
     if (lift > 0 && this.launchThruster.fuel > 0) {
       this.launchThruster.fuel = Math.max(0, this.launchThruster.fuel - 3.5 * dt);
     }
-
-    // FOV
-    if (camera) {
-      const targetFov = boost ? 82 : 70;
-      camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, 5, dt);
-      camera.updateProjectionMatrix();
+    if (canBoost) {
+      this.pulseEngine.fuel = Math.max(0, this.pulseEngine.fuel - 1.8 * dt);
     }
 
-    if (this.position.y > 120 && this.pulseEngine.repaired) {
+    // Cannot reach space without launch fuel for climb
+    if (this.position.y > 120 && this.pulseEngine.repaired && this.launchThruster.fuel > 0) {
       return 'to_space';
+    }
+    if (this.position.y > 115 && this.launchThruster.fuel <= 0) {
+      this.position.y = Math.min(this.position.y, 118);
+    }
+
+    if (camera) {
+      const targetFov = canBoost ? 82 : 70;
+      camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, 5, dt);
+      camera.updateProjectionMatrix();
     }
 
     sound.setThruster(Math.abs(this.speed) > 2 || lift > 0, Math.min(1, Math.abs(this.speed) / 40 + lift * 0.3));
@@ -172,7 +212,7 @@ export class ShipController {
   }
 
   _flySpace(dt, camera, mode) {
-    const boost = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
+    const wantBoost = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
     const throttle = this.keys['KeyW'] ? 1 : this.keys['KeyS'] ? -0.25 : 0.18;
     const turn = (this.keys['KeyA'] ? 1 : 0) + (this.keys['KeyD'] ? -1 : 0);
     const lift = (this.keys['Space'] ? 1 : 0) + (this.keys['ControlLeft'] ? -1 : 0);
@@ -183,8 +223,10 @@ export class ShipController {
     this.targetRoll = turn * 0.55;
     this.roll = THREE.MathUtils.damp(this.roll, this.targetRoll, 5, dt);
 
-    const max = boost && this.pulseEngine.fuel > 0 ? this.spaceSpeed : 105;
-    if (boost && this.pulseEngine.fuel > 0) {
+    const hyperMul = this.hyperdrive.installed ? 1.45 : 1;
+    const canBoost = wantBoost && this.pulseEngine.fuel > 0.5;
+    const max = (canBoost ? this.spaceSpeed : 105) * hyperMul;
+    if (canBoost) {
       this.pulseEngine.fuel = Math.max(0, this.pulseEngine.fuel - 2.5 * dt);
     }
     this.speed = THREE.MathUtils.damp(this.speed, throttle * max, 3.5, dt);
@@ -197,7 +239,7 @@ export class ShipController {
     this.position.addScaledVector(forward, this.speed * dt);
 
     if (camera) {
-      const targetFov = boost ? 88 : 72;
+      const targetFov = canBoost ? 88 : 72;
       camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, 4, dt);
       camera.updateProjectionMatrix();
     }

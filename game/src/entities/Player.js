@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BLOCKS, BLOCK_DROPS } from '../core/constants.js';
+import { BLOCKS, BLOCK_DROPS, ITEMS } from '../core/constants.js';
 import { sound } from '../audio/SoundManager.js';
 
 export class PlayerController {
@@ -28,12 +28,18 @@ export class PlayerController {
     this.pointerLocked = false;
     this.footTimer = 0;
     this.mineCooldown = 0;
+    this.placeCooldown = 0;
     this.targetBlock = null;
+    this.placeTarget = null;
+    this.hotbarIndex = 0;
     this.mouseSens = 0.002;
     this.bobPhase = 0;
     this.bobAmt = 0;
     this.fovBase = 70;
     this.fovSprint = 76;
+    this.hazardType = 'heat';
+    this.hazardDrain = 1.0;
+    this.dead = false;
 
     this._onKeyDown = (e) => {
       this.keys[e.code] = true;
@@ -108,7 +114,12 @@ export class PlayerController {
   }
 
   update(dt) {
+    if (this.dead) {
+      this.updateCamera(dt);
+      return;
+    }
     if (this.mineCooldown > 0) this.mineCooldown -= dt;
+    if (this.placeCooldown > 0) this.placeCooldown -= dt;
 
     const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
@@ -170,11 +181,16 @@ export class PlayerController {
     this.updateCamera(dt);
     this.targetBlock = this.raycastBlock(5.5);
 
-    // Hazard drain
-    this.hazard = Math.max(0, this.hazard - 1.0 * dt);
+    // Hazard drain — rate/type from current planet
+    this.hazard = Math.max(0, this.hazard - this.hazardDrain * dt);
     if (this.hazard < 15) {
       this.life = Math.max(0, this.life - 2.5 * dt);
     }
+  }
+
+  setHazardProfile(type = 'heat') {
+    this.hazardType = type;
+    this.hazardDrain = type === 'cold' ? 1.35 : type === 'heat' ? 1.15 : 1.0;
   }
 
   tryMine(inventory) {
@@ -186,7 +202,7 @@ export class PlayerController {
     const hard = id === BLOCKS.STONE || id === BLOCKS.FERRITE_ROCK || id === BLOCKS.COPPER_ORE;
     sound.mine(hard);
     const drop = BLOCK_DROPS[id];
-    let result = { x, y, z, id, item: null, qty: 0 };
+    let result = { x, y, z, id, item: null, qty: 0, extras: [] };
     if (drop) {
       const [lo, hi] = drop.amount;
       const qty = lo + Math.floor(Math.random() * (hi - lo + 1));
@@ -194,8 +210,52 @@ export class PlayerController {
       sound.collect();
       result.item = drop.item;
       result.qty = qty;
+      if (drop.also) {
+        inventory.add(drop.also.item, drop.also.qty);
+        result.extras.push(drop.also);
+      }
     }
     return result;
+  }
+
+  /** Place selected hotbar item as a block adjacent to target face */
+  tryPlace(inventory) {
+    if (this.placeCooldown > 0 || this.dead) return null;
+    const slot = inventory.items[this.hotbarIndex];
+    if (!slot) return null;
+    const def = ITEMS[slot.id];
+    if (!def?.place && slot.id !== 'portable_refiner') return null;
+
+    const hit = this.raycastBlock(5.5, true);
+    if (!hit?.prev) return null;
+    const { x, y, z } = hit.prev;
+    if (y < 1 || y >= 47) return null;
+    if (this.world.getBlock(x, y, z) !== BLOCKS.AIR) return null;
+
+    // Don't place inside player AABB
+    const feet = this.position;
+    if (
+      x === Math.floor(feet.x) &&
+      z === Math.floor(feet.z) &&
+      y >= Math.floor(feet.y) &&
+      y <= Math.floor(feet.y + this.height)
+    ) {
+      return null;
+    }
+
+    if (slot.id === 'portable_refiner') {
+      inventory.remove('portable_refiner', 1);
+      this.placeCooldown = 0.25;
+      sound.craft();
+      return { x, y, z, id: 'refiner', kind: 'prop' };
+    }
+
+    const blockId = def.place;
+    inventory.remove(slot.id, 1);
+    this.world.setBlock(x, y, z, blockId);
+    this.placeCooldown = 0.2;
+    sound.mine(false);
+    return { x, y, z, id: blockId, kind: 'block' };
   }
 
   getMineTargetPoint() {
@@ -240,7 +300,7 @@ export class PlayerController {
     return false;
   }
 
-  raycastBlock(maxDist = 5) {
+  raycastBlock(maxDist = 5, withPrev = false) {
     const origin = this.camera.position.clone();
     const dir = this.lookDir;
     let x = Math.floor(origin.x);
@@ -256,11 +316,15 @@ export class PlayerController {
     let tMaxY = stepY > 0 ? (Math.floor(origin.y) + 1 - origin.y) * tDeltaY : (origin.y - Math.floor(origin.y)) * tDeltaY;
     let tMaxZ = stepZ > 0 ? (Math.floor(origin.z) + 1 - origin.z) * tDeltaZ : (origin.z - Math.floor(origin.z)) * tDeltaZ;
     let dist = 0;
+    let prev = null;
     for (let i = 0; i < 72; i++) {
       const id = this.world.getBlock(x, y, z);
       if (id !== BLOCKS.AIR && id !== BLOCKS.WATER) {
-        return { x, y, z, id };
+        const hit = { x, y, z, id };
+        if (withPrev && prev) hit.prev = prev;
+        return hit;
       }
+      prev = { x, y, z };
       if (tMaxX < tMaxY) {
         if (tMaxX < tMaxZ) {
           x += stepX;
@@ -287,5 +351,19 @@ export class PlayerController {
 
   rechargeHazard(amount) {
     this.hazard = Math.min(100, this.hazard + amount);
+  }
+
+  kill() {
+    this.dead = true;
+    this.velocity.set(0, 0, 0);
+    this.life = 0;
+  }
+
+  respawnAt(x, z) {
+    this.dead = false;
+    this.life = 100;
+    this.hazard = 70;
+    this.jetpackFuel = this.jetpackMax;
+    this.spawn(x, z);
   }
 }

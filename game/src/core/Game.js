@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PLANETS, BLOCKS, ITEMS } from './constants.js';
+import { PLANETS, BLOCKS, ITEMS, TRADE_OFFERS } from './constants.js';
 import { Inventory } from '../systems/Inventory.js';
 import { MissionSystem } from '../systems/Mission.js';
 import { PlanetEntry } from '../systems/PlanetEntry.js';
@@ -39,6 +39,9 @@ export class Game {
       canFly: false,
       spaceTutorial: false,
       enteredSecondPlanet: false,
+      unlockedHyperdrive: false,
+      hyperdriveInstalled: false,
+      tradeUnlocked: false,
     };
     this.currentPlanetId = 'awakening';
     this.inventory = new Inventory();
@@ -109,6 +112,8 @@ export class Game {
     this.discovery = new DiscoverySystem(this);
     this._baseSky = 0x6ab0d0;
     this.dayNight.ensureLights();
+    this._placedRefiners = [];
+    this._deathTimer = 0;
 
     this.ui.setLoading(0.55, '部署坠毁星舰…');
     await this._delay(50);
@@ -172,6 +177,7 @@ export class Game {
       const dz = sz - 2.5;
       this.player.yaw = Math.atan2(-dx, -dz);
     }
+    this.player.setHazardProfile(planet?.hazard || 'heat');
 
     // Guaranteed starter resources near spawn
     this._seedStarterResources();
@@ -215,10 +221,12 @@ export class Game {
     this.net.connect(this.playerName);
 
     // Restore save if present
-    if (this._loadProgress()) {
+    const restored = this._loadProgress();
+    if (restored) {
       this.log('检测到航迹存档，已恢复进度。');
       if (this.flags.scannedShip) this.shipMarker.visible = true;
       if (this.flags.beaconRead && !this.flags.hermeticTaken) this.buildingMarker.visible = true;
+      await this._restoreWorldFromSave(restored);
     }
 
     this._bindInput();
@@ -386,8 +394,17 @@ export class Game {
       if (e.code === 'KeyE') this._doInteract();
       if (e.code === 'KeyF') this._toggleShip();
       if (e.code === 'KeyQ') {
-        // Use sodium to recharge hazard
-        if (this.inventory.has('sodium', 5)) {
+        const cold = this.player.hazardType === 'cold';
+        if (cold) {
+          if (this.inventory.has('oxygen', 5)) {
+            this.inventory.remove('oxygen', 5);
+            this.player.rechargeHazard(40);
+            sound.collect();
+            this.log('生命维持已充能（氧）。');
+          } else {
+            this.log('寒冷环境需要氧×5 充能防护。');
+          }
+        } else if (this.inventory.has('sodium', 5)) {
           this.inventory.remove('sodium', 5);
           this.player.rechargeHazard(40);
           sound.collect();
@@ -395,6 +412,11 @@ export class Game {
         } else {
           this.log('需要钠×5 充能防护。');
         }
+      }
+      // Hotbar 1-5
+      if (e.code >= 'Digit1' && e.code <= 'Digit5') {
+        this.player.hotbarIndex = Number(e.code.replace('Digit', '')) - 1;
+        this.ui.refreshHotbar();
       }
       if (e.code === 'KeyV') {
         this.visor?.setActive(true);
@@ -421,10 +443,50 @@ export class Game {
     this._mining = false;
     this.canvas.addEventListener('mousedown', (e) => {
       if (e.button === 0) this._mining = true;
+      if (e.button === 2 && this.mode === 'planet' && !this.ui.anyModalOpen()) {
+        e.preventDefault();
+        this._tryPlaceBlock();
+      }
     });
     window.addEventListener('mouseup', (e) => {
       if (e.button === 0) this._mining = false;
     });
+    this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  _tryPlaceBlock() {
+    if (this.visor?.active || this.player.dead) return;
+    const result = this.player.tryPlace(this.inventory);
+    if (!result) return;
+    if (result.kind === 'prop' && result.id === 'refiner') {
+      this.flags.refinerBuilt = true;
+      this.inventory.refinerAvailable = true;
+      // Visual: small blocky refiner
+      const g = new THREE.Group();
+      const body = new THREE.Mesh(
+        new THREE.BoxGeometry(0.9, 1.1, 0.9),
+        new THREE.MeshLambertMaterial({ color: 0xe8a832, flatShading: true })
+      );
+      body.position.y = 0.55;
+      g.add(body);
+      const top = new THREE.Mesh(
+        new THREE.BoxGeometry(0.5, 0.3, 0.5),
+        new THREE.MeshLambertMaterial({
+          color: 0x3ecfb4,
+          flatShading: true,
+          emissive: 0x3ecfb4,
+          emissiveIntensity: 0.4,
+        })
+      );
+      top.position.y = 1.25;
+      g.add(top);
+      g.position.set(result.x + 0.5, result.y, result.z + 0.5);
+      this.scene.add(g);
+      this._placedRefiners.push(g);
+      this.log('便携精炼机已部署。打开制作台可精炼铁尘。');
+    } else {
+      this.log('方块已放置。');
+    }
   }
 
   _doScan() {
@@ -469,7 +531,10 @@ export class Game {
         sound.craft();
         this.log('获得密封环！返回星舰安装。');
       } else {
-        this.log('终端已空。');
+        this.flags.tradeUnlocked = true;
+        this.ui.toggleTrade(true);
+        document.exitPointerLock();
+        this.log('银河贸易终端已连接。');
       }
       return;
     }
@@ -603,12 +668,50 @@ export class Game {
       for (const c of this._propCrystals) c.visible = home;
     }
 
+    // Seed copper near land site for hyperdrive mission
+    if (!home) {
+      for (const [x, z] of [
+        [3, 4],
+        [5, 2],
+        [7, 6],
+        [-2, 5],
+        [4, -3],
+      ]) {
+        const y = this.world.surfaceY(x, z);
+        this.world.setBlock(x, y, z, BLOCKS.COPPER_ORE);
+      }
+    }
+
     // Respawn local life
     this.fauna.spawnAround(0, 0, 10);
     this.fauna.spawnFloraProps(0, 0, 8);
+    this.player.setHazardProfile(planetDef.hazard || 'heat');
 
     this.mode = 'ship_planet';
-    this.log(`降落于 ${planetDef.name}。按 F 在低空离舰探索。`);
+    this.log(
+      `降落于 ${planetDef.name}（${planetDef.hazard === 'cold' ? '极寒' : '高温'}）。按 F 在低空离舰探索。`
+    );
+  }
+
+  _onPlayerDeath() {
+    this.player.kill();
+    this._deathTimer = 0;
+    sound.hazardWarning();
+    // Soft penalty — lose some sodium/oxygen
+    if (this.inventory.has('sodium', 10)) this.inventory.remove('sodium', 10);
+    else if (this.inventory.has('oxygen', 10)) this.inventory.remove('oxygen', 10);
+    this.log('外骨骼失效… 正在将你传送回星舰。');
+    document.getElementById('death-overlay')?.classList.remove('hidden');
+  }
+
+  _respawnPlayer() {
+    document.getElementById('death-overlay')?.classList.add('hidden');
+    const sx = this.ship.position.x;
+    const sz = this.ship.position.z;
+    this.player.respawnAt(Math.floor(sx) + 2, Math.floor(sz) + 2);
+    this.player.yaw = this.ship.yaw;
+    this._deathTimer = 0;
+    this.log('在星舰旁苏醒。防护已部分恢复。');
   }
 
   _updateMarkers(dt) {
@@ -634,7 +737,7 @@ export class Game {
     } else if (this.beacon && pos.distanceTo(this.beacon.position) < 4) {
       this.ui.setInteract('调查求救信标');
     } else if (this.building && pos.distanceTo(this.building.position) < 5) {
-      this.ui.setInteract(this.flags.hermeticTaken ? '检查终端' : '取得密封环');
+      this.ui.setInteract(this.flags.hermeticTaken ? '银河贸易终端' : '取得密封环');
     } else {
       this.ui.setInteract(null);
     }
@@ -656,6 +759,16 @@ export class Game {
     }
 
     if (this.mode === 'planet') {
+      if (this.player.dead) {
+        this._deathTimer += dt;
+        this.effects?.setMiningBeam(false);
+        this.effects?.setToolVisible(false);
+        if (this._deathTimer > 2.8) {
+          this._respawnPlayer();
+        }
+      } else if (this.player.life <= 0 && !this.player.dead) {
+        this._onPlayerDeath();
+      } else {
       this.player.update(dt);
       this.world.updateAround(this.player.position.x, this.player.position.z, 3);
       this.effects?.setHighlight(this.player.targetBlock);
@@ -688,6 +801,7 @@ export class Game {
       } else {
         this.effects?.setMiningBeam(false);
       }
+      }
     } else if (this.mode === 'ship_planet') {
       this.effects?.setHighlight(null);
       this.effects?.setMiningBeam(false);
@@ -702,8 +816,16 @@ export class Game {
       this.ship.updateCamera(this.camera, dt);
       this.player.position.copy(this.ship.position);
       if (this.world) this.world.updateAround(this.ship.position.x, this.ship.position.z, 3);
-      if (transition === 'to_space' || this.ship.position.y > 120) {
+      if (transition === 'to_space') {
         this.enterSpace();
+      } else if (this.ship.position.y > 118 && this.ship.launchThruster.fuel <= 0) {
+        // Soft warn once
+        if (!this._fuelWarn) {
+          this._fuelWarn = true;
+          this.log('发射燃料耗尽！返回星舰面板加注发射燃料。');
+        }
+      } else if (this.ship.launchThruster.fuel > 5) {
+        this._fuelWarn = false;
       }
     } else if (this.mode === 'space') {
       this.effects?.setToolVisible(false);
@@ -827,8 +949,16 @@ export class Game {
         ship: {
           pulse: this.ship.pulseEngine,
           launch: this.ship.launchThruster,
+          hyperdrive: this.ship.hyperdrive,
         },
         planet: this.currentPlanetId,
+        mode: this.mode === 'entering' ? 'space' : this.mode,
+        pos: {
+          x: this.mode === 'planet' ? this.player.position.x : this.ship.position.x,
+          y: this.mode === 'planet' ? this.player.position.y : this.ship.position.y,
+          z: this.mode === 'planet' ? this.player.position.z : this.ship.position.z,
+          yaw: this.mode === 'planet' ? this.player.yaw : this.ship.yaw,
+        },
         name: this.playerName,
         units: this.discovery?.units || 0,
         fauna: [...(this.fauna?.discovered || [])],
@@ -845,22 +975,77 @@ export class Game {
   _loadProgress() {
     try {
       const raw = localStorage.getItem('voxbound_save');
-      if (!raw) return false;
+      if (!raw) return null;
       const data = JSON.parse(raw);
       if (data.flags) Object.assign(this.flags, data.flags);
       if (data.inventory) this.inventory.items = data.inventory;
       if (typeof data.mission === 'number') this.mission.stageIndex = data.mission;
       if (data.ship?.pulse) Object.assign(this.ship.pulseEngine, data.ship.pulse);
       if (data.ship?.launch) Object.assign(this.ship.launchThruster, data.ship.launch);
+      if (data.ship?.hyperdrive) Object.assign(this.ship.hyperdrive, data.ship.hyperdrive);
+      if (this.ship.hyperdrive?.installed) this.flags.hyperdriveInstalled = true;
       if (typeof data.units === 'number' && this.discovery) this.discovery.units = data.units;
       if (data.fauna && this.fauna) this.fauna.discovered = new Set(data.fauna);
       if (data.flora && this.fauna) this.fauna.floraDiscovered = new Set(data.flora);
       if (data.minerals && this.discovery) this.discovery._minerals = new Set(data.minerals);
       if (typeof data.dayTime === 'number' && this.dayNight) this.dayNight.time = data.dayTime;
-      return true;
+      this._pendingRestore = data;
+      return data;
     } catch {
-      return false;
+      return null;
     }
+  }
+
+  async _restoreWorldFromSave(data) {
+    if (!data?.planet || data.planet === this.currentPlanetId) {
+      if (data?.pos && data.mode === 'planet') {
+        this.player.position.set(data.pos.x, data.pos.y, data.pos.z);
+        this.player.yaw = data.pos.yaw || this.player.yaw;
+        this.world.updateAround(data.pos.x, data.pos.z, 4);
+      }
+      return;
+    }
+    const def = PLANETS.find((p) => p.id === data.planet);
+    if (!def) return;
+    // Land without cinematic
+    this.space.setActive(false);
+    this.fauna?.clear();
+    this._setupPlanetLights(def.atmosphere);
+    if (this.world) this.world.dispose();
+    this.world = new VoxelWorld(def, this.scene);
+    this.world.updateAround(0, 0, 4);
+    this.player.world = this.world;
+    this.currentPlanetId = def.id;
+    const home = def.id === 'awakening';
+    this.beacon.visible = home;
+    this.building.visible = home;
+    if (this.debris) this.debris.visible = home;
+    if (this._crashPlume) this._crashPlume.visible = home;
+    if (this._propCrystals) for (const c of this._propCrystals) c.visible = home;
+
+    const sy = this.world.surfaceY(0, 0);
+    if (data.mode === 'space') {
+      this.enterSpace();
+      if (data.pos) this.ship.position.set(data.pos.x, data.pos.y, data.pos.z);
+    } else if (data.mode === 'ship_planet') {
+      this.ship.endEntry(sy);
+      if (data.pos) this.ship.position.set(data.pos.x, data.pos.y, data.pos.z);
+      this.shipMesh.position.copy(this.ship.position);
+      this.mode = 'ship_planet';
+    } else {
+      this.ship.place(2, sy, 2);
+      this.shipMesh.position.copy(this.ship.position);
+      this.mode = 'planet';
+      if (data.pos) {
+        this.player.position.set(data.pos.x, data.pos.y, data.pos.z);
+        this.player.yaw = data.pos.yaw || 0;
+      } else {
+        this.player.spawn(2, 2);
+      }
+      this.fauna.spawnAround(this.player.position.x, this.player.position.z, 8);
+      this.fauna.spawnFloraProps(this.player.position.x, this.player.position.z, 6);
+    }
+    this.player.setHazardProfile(def.hazard || 'heat');
   }
 
   _onResize() {

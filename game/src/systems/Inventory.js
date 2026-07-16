@@ -67,6 +67,7 @@ export function getUnlockedRecipes(flags) {
     if (r.unlock === 'start') return true;
     if (r.unlock === 'refiner') return flags.unlockedRefiner || flags.diagnosed;
     if (r.unlock === 'flight') return flags.canFly || flags.spaceTutorial;
+    if (r.unlock === 'hyperdrive') return flags.unlockedHyperdrive || flags.enteredSecondPlanet || flags.hyperdriveInstalled;
     return false;
   });
 }

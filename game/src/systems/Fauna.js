@@ -244,11 +244,12 @@ export class FaunaSystem {
         c.vz = Math.sin(a) * spd;
         // Flee if aggressive and player close
         if (c.type.temper === '好斗') {
-          const dx = c.mesh.position.x - player.x;
-          const dz = c.mesh.position.z - player.z;
+          const dx = player.x - c.mesh.position.x;
+          const dz = player.z - c.mesh.position.z;
           if (dx * dx + dz * dz < 100) {
-            c.vx = dx * 0.3;
-            c.vz = dz * 0.3;
+            // Charge toward player
+            c.vx = dx * 0.25;
+            c.vz = dz * 0.25;
           }
         }
       }

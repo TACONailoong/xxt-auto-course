@@ -1,4 +1,4 @@
-import { ITEMS, RECIPES, BLOCK_NAMES } from '../core/constants.js';
+import { ITEMS, RECIPES, BLOCK_NAMES, TRADE_OFFERS } from '../core/constants.js';
 import { getUnlockedRecipes } from '../systems/Inventory.js';
 import { sound } from '../audio/SoundManager.js';
 
@@ -69,11 +69,12 @@ export class UIManager {
   refreshHotbar() {
     const bar = document.getElementById('hotbar');
     const items = this.game.inventory.items.slice(0, 5);
+    const sel = this.game.player?.hotbarIndex ?? 0;
     bar.innerHTML = [0, 1, 2, 3, 4]
       .map((i) => {
         const it = items[i];
         const def = it ? ITEMS[it.id] : null;
-        return `<div class="hot-slot ${i === 0 ? 'active' : ''}">
+        return `<div class="hot-slot ${i === sel ? 'active' : ''}" data-slot="${i}">
           <span class="key">${i + 1}</span>
           ${def ? `<span style="color:${def.color}">${def.icon}</span><span>${it.qty}</span>` : ''}
         </div>`;
@@ -288,6 +289,7 @@ export class UIManager {
     const el = document.getElementById('ship-status');
     const pulseOk = ship.pulseEngine.repaired;
     const launchOk = ship.launchThruster.repaired;
+    const hyperOk = ship.hyperdrive?.installed;
 
     el.innerHTML = `
       <div class="ship-part ${pulseOk ? 'ok' : 'broken'}" data-part="pulse">
@@ -309,8 +311,24 @@ export class UIManager {
         <div class="part-req" style="margin-top:0.35rem;color:var(--amber)">点击安装可用部件</div>
       </div>
       ${
+        this.game.flags.unlockedHyperdrive || hyperOk
+          ? `<div class="ship-part ${hyperOk ? 'ok' : 'broken'}" data-part="hyper">
+              <div class="part-name">超空间核心 ${hyperOk ? '· 在线' : '· 待安装'}</div>
+              <div class="part-req">色谱金属核心 ${hyperOk ? '✓' : '✗'} · 深空脉冲加速</div>
+              <div class="part-req" style="margin-top:0.35rem;color:var(--amber)">点击安装超空间核心</div>
+            </div>`
+          : ''
+      }
+      ${
         ship.repaired
-          ? `<div class="ship-part ok"><div class="part-name">系统就绪</div><div class="part-req">关闭面板后按住 Space 升空</div></div>`
+          ? `<div class="ship-part ok refuel-row">
+              <div class="part-name">燃料补给</div>
+              <div class="part-req">发射燃料加注推进器 · 双氢×25 加注脉冲</div>
+              <div class="refuel-btns">
+                <button class="craft-btn" data-refuel="launch">加注发射</button>
+                <button class="craft-btn" data-refuel="pulse">加注脉冲</button>
+              </div>
+            </div>`
           : ''
       }
     `;
@@ -323,9 +341,74 @@ export class UIManager {
           ok = ship.tryInstallPlating(this.game.inventory) || ship.tryInstallSeal(this.game.inventory);
         } else if (which === 'launch') {
           ok = ship.tryInstallJelly(this.game.inventory) || ship.tryInstallFerrite(this.game.inventory);
+        } else if (which === 'hyper') {
+          ok = ship.tryInstallHyperdrive(this.game.inventory);
+          if (ok) {
+            this.game.flags.hyperdriveInstalled = true;
+            this.game.log('超空间核心已安装。');
+          }
         }
-        if (ok) this.game.log('部件已安装。');
+        if (ok && which !== 'hyper') this.game.log('部件已安装。');
         this.renderShipPanel();
+      });
+    });
+
+    el.querySelectorAll('[data-refuel]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const which = btn.dataset.refuel;
+        let ok = false;
+        if (which === 'launch') ok = ship.tryRefuelLaunch(this.game.inventory);
+        if (which === 'pulse') ok = ship.tryRefuelPulse(this.game.inventory);
+        this.game.log(ok ? '燃料已加注。' : '无法加注（缺少材料或已满）。');
+        this.renderShipPanel();
+      });
+    });
+  }
+
+  toggleTrade(force) {
+    const modal = document.getElementById('trade-modal');
+    if (!modal) return;
+    const open = force ?? modal.classList.contains('hidden');
+    if (open) {
+      this.closeModals();
+      modal.classList.remove('hidden');
+      sound.uiOpen();
+      this.renderTrade();
+    } else {
+      modal.classList.add('hidden');
+      sound.uiClose();
+    }
+  }
+
+  renderTrade() {
+    const list = document.getElementById('trade-list');
+    const units = this.game.discovery?.units || 0;
+    document.getElementById('trade-units').textContent = units.toLocaleString();
+    list.innerHTML = TRADE_OFFERS.map((o) => {
+      const can = units >= o.cost;
+      return `<div class="craft-row ${can ? 'can' : 'locked'}" data-trade="${o.id}">
+        <div class="craft-info">
+          <div class="craft-name">${o.name}</div>
+          <div class="craft-cost">${o.cost.toLocaleString()} Units</div>
+        </div>
+        <button class="craft-btn">购买</button>
+      </div>`;
+    }).join('');
+    list.querySelectorAll('[data-trade]').forEach((row) => {
+      row.addEventListener('click', () => {
+        const offer = TRADE_OFFERS.find((o) => o.id === row.dataset.trade);
+        if (!offer) return;
+        if ((this.game.discovery?.units || 0) < offer.cost) {
+          this.game.log('Units 不足。');
+          return;
+        }
+        this.game.discovery.units -= offer.cost;
+        this.game.inventory.add(offer.give.item, offer.give.qty);
+        sound.collect();
+        this.game.log(`购入 ${offer.name}（-${offer.cost}u）。`);
+        this.renderTrade();
+        this.refreshResources();
       });
     });
   }
@@ -349,7 +432,8 @@ export class UIManager {
     return (
       !document.getElementById('inventory-modal').classList.contains('hidden') ||
       !document.getElementById('craft-modal').classList.contains('hidden') ||
-      !document.getElementById('ship-panel').classList.contains('hidden')
+      !document.getElementById('ship-panel').classList.contains('hidden') ||
+      !document.getElementById('trade-modal')?.classList.contains('hidden')
     );
   }
 
@@ -357,5 +441,6 @@ export class UIManager {
     document.getElementById('inventory-modal').classList.add('hidden');
     document.getElementById('craft-modal').classList.add('hidden');
     document.getElementById('ship-panel').classList.add('hidden');
+    document.getElementById('trade-modal')?.classList.add('hidden');
   }
 }

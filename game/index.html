@@ -39,12 +39,14 @@
           <span>WASD 移动</span>
           <span>鼠标 视角</span>
           <span>左键 开采/分析</span>
+          <span>右键 放置</span>
           <span>E 交互</span>
           <span>F 进入飞船</span>
           <span>R 扫描</span>
           <span>V 分析面罩</span>
           <span>C 制作</span>
           <span>Tab 背包</span>
+          <span>1-5 快捷栏</span>
           <span>Q 充能防护</span>
         </div>
       </div>
@@ -179,8 +181,23 @@
         <div class="modal-frame ship-frame">
           <div class="modal-title">星舰诊断 · 临界维护</div>
           <div id="ship-status"></div>
-          <div class="modal-hint">Esc 关闭 · 点击修复部件</div>
+          <div class="modal-hint">Esc 关闭 · 点击修复 / 加注</div>
         </div>
+      </div>
+
+      <!-- Trade terminal -->
+      <div id="trade-modal" class="modal hidden">
+        <div class="modal-frame craft-frame">
+          <div class="modal-title">银河贸易终端 · <span id="trade-units">0</span>u</div>
+          <div id="trade-list"></div>
+          <div class="modal-hint">Esc 关闭 · 使用 Units 兑换物资</div>
+        </div>
+      </div>
+
+      <!-- Death overlay -->
+      <div id="death-overlay" class="hidden">
+        <div class="death-text">外骨骼失效</div>
+        <div class="death-sub">正在传送回星舰…</div>
       </div>
 
       <!-- Dialogue / log -->
