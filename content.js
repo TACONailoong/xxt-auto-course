@@ -241,17 +241,22 @@
             }
             this.applySettings();
             if (IS_TOP) {
-              this.ensureHud();
-              this.updateHud();
               if (changes.isRunning && prevRunning !== this.settings.isRunning) {
                 if (this.settings.isRunning) {
                   this.lastActiveTickAt = 0;
                   this.recoverLevel = 0;
                   this.recoverFailCycles = 0;
                   this.verifyClearHintShown = false;
-                  // 清除粘滞暂停相位，允许 iframe 进度重新驱动文案
+                  // 先清除粘滞相位，再刷新浮层
                   this.status.phase = 'idle';
                   this.status.detail = '已恢复自动刷课';
+                  this.status.updatedAt = Date.now();
+                }
+              }
+              this.ensureHud();
+              this.updateHud();
+              if (changes.isRunning && prevRunning !== this.settings.isRunning) {
+                if (this.settings.isRunning) {
                   this.showToast('已开始自动刷课');
                   this.publishStatus(true);
                 } else if (!this.limitPausePending) {
