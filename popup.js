@@ -270,7 +270,16 @@ async function refreshLiveStatus() {
 
     nowPanel.classList.remove('is-offline');
     nowPanel.classList.add('is-online');
-    nowKicker.textContent = settings.isRunning ? '正在学习' : '已暂停';
+    const phase = status.phase || '';
+    if (!settings.isRunning) {
+      if (phase === 'verify') nowKicker.textContent = '待人工验证';
+      else if (phase === 'limit') nowKicker.textContent = '已达上限';
+      else if (phase === 'done') nowKicker.textContent = '已学完';
+      else if (phase === 'stall') nowKicker.textContent = '播放异常';
+      else nowKicker.textContent = '已暂停';
+    } else {
+      nowKicker.textContent = '正在学习';
+    }
     liveChapter.textContent = status.chapter || '未识别当前章节';
     const pct = formatProgress(status.progress);
     const detail =

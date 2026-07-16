@@ -110,6 +110,18 @@ function sleep(ms) {
       .catch(() => false);
     check('浮层支持快捷调速', hasSpeedBtns);
 
+    const hasQuickActions = await page
+      .evaluate(() => {
+        const hud = document.querySelector('#xxt-assistant-hud');
+        return !!(
+          hud &&
+          hud.querySelector('[data-role="next"]') &&
+          hud.querySelector('[data-role="reset-stats"]')
+        );
+      })
+      .catch(() => false);
+    check('浮层支持下一节与重置会话', hasQuickActions);
+
     let videoState = null;
     for (const f of page.frames()) {
       videoState = await f
@@ -231,7 +243,7 @@ function sleep(ms) {
       check('弹窗提供会话限流输入', maxChaptersExists && maxMinutesExists);
 
       const footerText = await popup.$eval('.footer', el => el.textContent);
-      check('弹窗版本为 1.11.0', footerText.includes('v1.11.0'), footerText);
+      check('弹窗版本为 1.12.0', footerText.includes('v1.12.0'), footerText);
 
       const liveProgressWidth = await popup.$eval('#liveProgress', el => el.style.width || '0%');
       const livePct = parseFloat(liveProgressWidth) || 0;
@@ -325,17 +337,51 @@ function sleep(ms) {
         /人工验证|人脸/.test(afterFace.detail),
       JSON.stringify({ ...afterFace, facePausedInStorage })
     );
-    // 恢复运行，供后续测验页用例使用
+
+    // 验证弹窗消失后提示可继续（不自动绕过）
     await page.evaluate(() => {
       const mask = document.getElementById('faceMask');
       if (mask) mask.style.display = 'none';
     });
+    await sleep(3500);
+    const afterClear = await page.evaluate(() => {
+      const detail = document.querySelector('#xxt-assistant-hud [data-role="detail"]');
+      const toast = document.getElementById('xxt-assistant-toast');
+      return {
+        detail: (detail && detail.textContent) || '',
+        toast: (toast && toast.textContent) || ''
+      };
+    });
+    check(
+      '验证消失后提示可继续',
+      /验证已消失|可点开始/.test(afterClear.detail) ||
+        /验证.*消失|可点开始/.test(afterClear.toast),
+      JSON.stringify(afterClear)
+    );
+
+    // 恢复运行，供后续测验页用例使用
     if (faceWorker) {
       await faceWorker.evaluate(async () => {
         await chrome.storage.sync.set({ isRunning: true });
       });
     }
     await sleep(800);
+
+    // 恢复后粘滞相位应被清除，浮层不再卡在验证文案
+    await sleep(2000);
+    const afterResume = await page.evaluate(() => {
+      const detail = document.querySelector('#xxt-assistant-hud [data-role="detail"]');
+      const toggle = document.querySelector('#xxt-assistant-hud [data-role="toggle"]');
+      return {
+        detail: (detail && detail.textContent) || '',
+        toggle: (toggle && toggle.textContent) || ''
+      };
+    });
+    check(
+      '恢复运行后清除验证粘滞状态',
+      afterResume.toggle === '暂停' && !/人工验证/.test(afterResume.detail),
+      JSON.stringify(afterResume)
+    );
 
     // 测验页跳过
     const quizPage = await browser.newPage();

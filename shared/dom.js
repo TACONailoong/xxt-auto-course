@@ -102,7 +102,21 @@ function xxtIsManualVerificationText(text) {
 }
 
 function xxtIsProtectedStatusPhase(phase) {
-  return ['limit', 'done', 'paused', 'verify', 'dead'].includes(String(phase || ''));
+  return ['limit', 'done', 'paused', 'verify', 'stall', 'dead'].includes(
+    String(phase || '')
+  );
+}
+
+function xxtHasVisibleManualVerification(roots, isVisibleFn) {
+  const list = Array.isArray(roots) ? roots : [];
+  const visible = typeof isVisibleFn === 'function' ? isVisibleFn : () => true;
+  for (const el of list) {
+    if (!el || !visible(el)) continue;
+    const text = el.textContent || '';
+    if (!text || text.length > 2000) continue;
+    if (xxtIsManualVerificationText(text)) return true;
+  }
+  return false;
 }
 
 function xxtSummarizeOptions(settings) {
@@ -221,7 +235,8 @@ const XXT_DOM = {
   shouldStopByLimits: xxtShouldStopByLimits,
   trimSet: xxtTrimSet,
   isManualVerificationText: xxtIsManualVerificationText,
-  isProtectedStatusPhase: xxtIsProtectedStatusPhase
+  isProtectedStatusPhase: xxtIsProtectedStatusPhase,
+  hasVisibleManualVerification: xxtHasVisibleManualVerification
 };
 
 if (typeof globalThis !== 'undefined') {
@@ -247,7 +262,8 @@ if (typeof globalThis !== 'undefined') {
     xxtShouldStopByLimits,
     xxtTrimSet,
     xxtIsManualVerificationText,
-    xxtIsProtectedStatusPhase
+    xxtIsProtectedStatusPhase,
+    xxtHasVisibleManualVerification
   });
 }
 

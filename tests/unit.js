@@ -111,7 +111,26 @@ test('isManualVerificationText', () => {
 test('isProtectedStatusPhase', () => {
   assert.strictEqual(DOM.isProtectedStatusPhase('limit'), true);
   assert.strictEqual(DOM.isProtectedStatusPhase('verify'), true);
+  assert.strictEqual(DOM.isProtectedStatusPhase('stall'), true);
   assert.strictEqual(DOM.isProtectedStatusPhase('playing'), false);
+});
+
+test('hasVisibleManualVerification', () => {
+  const roots = [
+    { textContent: '继续学习', visible: true },
+    { textContent: '请完成人脸识别', visible: true }
+  ];
+  assert.strictEqual(
+    DOM.hasVisibleManualVerification(roots, el => el.visible),
+    true
+  );
+  assert.strictEqual(
+    DOM.hasVisibleManualVerification(
+      [{ textContent: '继续学习', visible: true }],
+      el => el.visible
+    ),
+    false
+  );
 });
 
 test('summarizeOptions', () => {

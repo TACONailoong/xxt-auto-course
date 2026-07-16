@@ -48,7 +48,17 @@
     (text => /人脸|刷脸|安全验证|身份验证|人脸识别/.test(String(text || '')));
   const isProtectedStatusPhase =
     DOM.isProtectedStatusPhase ||
-    (phase => ['limit', 'done', 'paused', 'verify', 'dead'].includes(String(phase || '')));
+    (phase =>
+      ['limit', 'done', 'paused', 'verify', 'stall', 'dead'].includes(String(phase || '')));
+  const hasVisibleManualVerification =
+    DOM.hasVisibleManualVerification ||
+    ((roots, vis) => {
+      for (const el of roots || []) {
+        if (!el || (vis && !vis(el))) continue;
+        if (isManualVerificationText(el.textContent || '')) return true;
+      }
+      return false;
+    });
   const FINGERPRINT_LIMIT =
     (typeof XXT_FINGERPRINT_LIMIT !== 'undefined' && XXT_FINGERPRINT_LIMIT) || 80;
 
@@ -96,6 +106,8 @@
       this.lastGuardAt = 0;
       this.lastBgHintAt = 0;
       this.lastVerifyCheckAt = 0;
+      this.verifyClearHintShown = false;
+      this.recoverFailCycles = 0;
       this.status = {
         phase: 'idle',
         detail: '等待课程页面…',
@@ -234,7 +246,14 @@
               if (changes.isRunning && prevRunning !== this.settings.isRunning) {
                 if (this.settings.isRunning) {
                   this.lastActiveTickAt = 0;
+                  this.recoverLevel = 0;
+                  this.recoverFailCycles = 0;
+                  this.verifyClearHintShown = false;
+                  // 清除粘滞暂停相位，允许 iframe 进度重新驱动文案
+                  this.status.phase = 'idle';
+                  this.status.detail = '已恢复自动刷课';
                   this.showToast('已开始自动刷课');
+                  this.publishStatus(true);
                 } else if (!this.limitPausePending) {
                   this.showToast('已暂停自动刷课');
                 }
@@ -345,8 +364,8 @@
     applyFrameStatus(payload, force = false) {
       if (!IS_TOP || !payload || typeof payload !== 'object') return;
 
-      // 已暂停/限流/验证时只同步进度，避免 iframe 覆盖暂停原因
-      if (!this.settings.isRunning || isProtectedStatusPhase(this.status.phase)) {
+      // 仅在暂停时锁定文案；运行中允许 iframe 更新 phase/detail
+      if (!this.settings.isRunning) {
         if (typeof payload.progress === 'number') {
           this.status.progress = payload.progress;
         }
@@ -673,6 +692,10 @@
             </div>
           </div>
           <div data-role="stats" style="margin-top:6px;opacity:0.68;font-size:11px;font-family:'Avenir Next','PingFang SC',sans-serif;"></div>
+          <div data-role="quick" style="display:flex;gap:6px;margin-top:8px;">
+            <button data-role="next" type="button" title="进入下一未完成节">下一节</button>
+            <button data-role="reset-stats" type="button" title="重置切章/答题/活跃时长">重置会话</button>
+          </div>
         </div>
       `;
 
@@ -754,6 +777,25 @@
       root.querySelector('[data-role="speed-up"]').addEventListener('click', e => {
         stop(e);
         this.adjustSpeed(0.25);
+      });
+
+      root.querySelector('[data-role="next"]').addEventListener('click', e => {
+        stop(e);
+        this.showToast('正在切换下一节…');
+        this.requestNextChapter('hud-next', { force: true });
+      });
+
+      root.querySelector('[data-role="reset-stats"]').addEventListener('click', async e => {
+        stop(e);
+        if (!this.ensureAlive()) return;
+        this.stats = createEmptyStats();
+        this.lastActiveTickAt = 0;
+        this.hadRemaining = false;
+        await this.persistStats();
+        this.showToast('会话统计已重置');
+        this.pushLog('已重置会话统计');
+        this.updateHud();
+        this.publishStatus(true);
       });
 
       const dragHandle = root.querySelector('[data-role="drag"]');
@@ -892,10 +934,13 @@
       this.hud.style.padding = isCompact ? '10px 12px' : '12px 14px';
 
       if (isCompact) {
-        const bits = [
-          this.settings.isRunning ? '运行中' : '已停止',
-          `${this.settings.playbackSpeed}x`
-        ];
+        const bits = [];
+        if (!this.settings.isRunning && isProtectedStatusPhase(this.status.phase)) {
+          bits.push((this.status.detail || '已停止').slice(0, 18));
+        } else {
+          bits.push(this.settings.isRunning ? '运行中' : '已停止');
+        }
+        bits.push(`${this.settings.playbackSpeed}x`);
         if (this.status.hasVideo) bits.push(`${pct}%`);
         compactMeta.textContent = bits.join(' · ');
         this.hud.style.opacity = this.settings.isRunning ? '1' : '0.75';
@@ -1086,6 +1131,15 @@
         this.tryPlay(video);
         return;
       }
+
+      // level 4：reload 一轮；连续失败则软暂停，避免无限空转
+      this.recoverFailCycles += 1;
+      if (this.recoverFailCycles >= 3) {
+        this.recoverFailCycles = 0;
+        this.recoverLevel = 0;
+        this.pauseForReason('多次恢复失败，已自动暂停', 'stall');
+        return;
+      }
       try {
         const t = video.currentTime || 0;
         video.load();
@@ -1094,6 +1148,7 @@
       if (this.settings.mute) video.muted = true;
       video.playbackRate = this.settings.playbackSpeed;
       this.tryPlay(video);
+      this.recoverLevel = 0;
     }
 
     tryPlay(video) {
@@ -1142,7 +1197,10 @@
       }
 
       if (!this.settings.isRunning) {
-        if (IS_TOP) this.updateHud();
+        if (IS_TOP) {
+          this.maybeHintVerificationCleared();
+          this.updateHud();
+        }
         return;
       }
 
@@ -1167,13 +1225,8 @@
       this.dismissJobFinishTip();
     }
 
-    detectManualVerification() {
-      if (!this.settings.isRunning) return false;
-      const now = Date.now();
-      if (now - this.lastVerifyCheckAt < 2000) return false;
-      this.lastVerifyCheckAt = now;
-
-      const candidates = document.querySelectorAll(
+    queryVerificationRoots() {
+      return document.querySelectorAll(
         [
           '.maskDiv',
           '.popDiv',
@@ -1187,16 +1240,34 @@
           '[class*="verify"]'
         ].join(',')
       );
+    }
 
-      for (const el of candidates) {
-        if (!isVisible(el)) continue;
-        const text = el.textContent || '';
-        if (!text || text.length > 2000) continue;
-        if (!isManualVerificationText(text)) continue;
+    detectManualVerification() {
+      if (!this.settings.isRunning) return false;
+      const now = Date.now();
+      if (now - this.lastVerifyCheckAt < 2000) return false;
+      this.lastVerifyCheckAt = now;
+
+      if (hasVisibleManualVerification([...this.queryVerificationRoots()], isVisible)) {
+        this.verifyClearHintShown = false;
         this.pauseForReason('检测到需要人工验证，已自动暂停', 'verify');
         return true;
       }
       return false;
+    }
+
+    maybeHintVerificationCleared() {
+      if (!IS_TOP || this.settings.isRunning) return;
+      if (this.status.phase !== 'verify' || this.verifyClearHintShown) return;
+      const now = Date.now();
+      if (now - this.lastVerifyCheckAt < 2000) return;
+      this.lastVerifyCheckAt = now;
+      if (hasVisibleManualVerification([...this.queryVerificationRoots()], isVisible)) {
+        return;
+      }
+      this.verifyClearHintShown = true;
+      this.showToast('验证弹窗已消失，可点开始继续');
+      this.setStatus('paused', '验证已消失，可点开始继续');
     }
 
     guardVideo(video) {
@@ -1221,8 +1292,9 @@
         } else {
           this.stallLastTime = t;
           this.stallLastWall = now;
-          if (this.recoverLevel > 0 && this.status.phase === 'recover') {
+          if (this.recoverLevel > 0 || this.recoverFailCycles > 0) {
             this.recoverLevel = 0;
+            this.recoverFailCycles = 0;
           }
         }
 
@@ -1330,6 +1402,11 @@
       for (const btn of document.querySelectorAll('a, button, .jb_btn')) {
         const text = normalizeText(btn.textContent);
         if ((text === '继续学习' || text === '我知道了') && isVisible(btn)) {
+          const host =
+            btn.closest(
+              '.maskDiv, .popDiv, .dialog, .layui-layer, .ant-modal, [role="dialog"]'
+            ) || btn.parentElement;
+          if (host && isManualVerificationText(host.textContent || '')) continue;
           safeClick(btn);
           this.lastIdleDismissAt = Date.now();
           this.setStatus('dialog', `已关闭提示：${text}`);
@@ -1520,8 +1597,8 @@
       }
     }
 
-    requestNextChapter(reason) {
-      if (!this.settings.autoNext) return;
+    requestNextChapter(reason, { force = false } = {}) {
+      if (!force && !this.settings.autoNext) return;
       if (this.nextPending || Date.now() - this.lastNextAt < 4000) return;
       this.nextPending = true;
       this.lastNextAt = Date.now();
