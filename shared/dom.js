@@ -119,6 +119,23 @@ function xxtHasVisibleManualVerification(roots, isVisibleFn) {
   return false;
 }
 
+function xxtBadgeForPausedPhase(phase) {
+  switch (String(phase || '')) {
+    case 'verify':
+      return { text: '验', color: '#f59e0b', label: '待人工验证' };
+    case 'stall':
+      return { text: '卡', color: '#ef4444', label: '播放异常' };
+    case 'limit':
+      return { text: '满', color: '#94a3b8', label: '已达上限' };
+    case 'done':
+      return { text: '完', color: '#64748b', label: '已学完' };
+    case 'dead':
+      return { text: '!', color: '#ef4444', label: '请刷新课程页' };
+    default:
+      return { text: '停', color: '#94a3b8', label: '已停止' };
+  }
+}
+
 function xxtSummarizeOptions(settings) {
   const chips = [];
   if (settings.autoAnswer) chips.push('答题');
@@ -236,7 +253,8 @@ const XXT_DOM = {
   trimSet: xxtTrimSet,
   isManualVerificationText: xxtIsManualVerificationText,
   isProtectedStatusPhase: xxtIsProtectedStatusPhase,
-  hasVisibleManualVerification: xxtHasVisibleManualVerification
+  hasVisibleManualVerification: xxtHasVisibleManualVerification,
+  badgeForPausedPhase: xxtBadgeForPausedPhase
 };
 
 if (typeof globalThis !== 'undefined') {
@@ -263,7 +281,8 @@ if (typeof globalThis !== 'undefined') {
     xxtTrimSet,
     xxtIsManualVerificationText,
     xxtIsProtectedStatusPhase,
-    xxtHasVisibleManualVerification
+    xxtHasVisibleManualVerification,
+    xxtBadgeForPausedPhase
   });
 }
 

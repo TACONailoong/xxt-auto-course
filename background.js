@@ -1,12 +1,15 @@
 // 学习通自动刷课插件 - 背景脚本
 // 职责：补齐默认配置、更新 badge、处理快捷键。
 
-importScripts('shared/defaults.js');
+importScripts('shared/defaults.js', 'shared/dom.js');
 
 const DEFAULT_SETTINGS = globalThis.XXT_DEFAULT_SETTINGS;
 const STATUS_KEY = globalThis.XXT_STATUS_KEY;
 const HUD_LAYOUT_KEY = globalThis.XXT_HUD_LAYOUT_KEY;
 const RELOAD_HINT_KEY = globalThis.XXT_RELOAD_HINT_KEY || 'xxtReloadHint';
+const badgeForPausedPhase =
+  globalThis.xxtBadgeForPausedPhase ||
+  (() => ({ text: '停', color: '#94a3b8', label: '已停止' }));
 
 async function ensureDefaults() {
   const current = await chrome.storage.sync.get(DEFAULT_SETTINGS);
@@ -21,9 +24,12 @@ async function updateBadgeFromState() {
     const fresh = status && Date.now() - (status.updatedAt || 0) < 20000;
 
     if (!sync.isRunning) {
-      await chrome.action.setBadgeText({ text: '停' });
-      await chrome.action.setBadgeBackgroundColor({ color: '#94a3b8' });
-      await chrome.action.setTitle({ title: '学习通助手：已停止' });
+      const badge = badgeForPausedPhase(fresh ? status.phase : '');
+      await chrome.action.setBadgeText({ text: badge.text });
+      await chrome.action.setBadgeBackgroundColor({ color: badge.color });
+      await chrome.action.setTitle({
+        title: `学习通助手：${(fresh && status && status.detail) || badge.label}`
+      });
       return;
     }
 

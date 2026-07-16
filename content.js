@@ -162,21 +162,27 @@
       if (this.dead) return;
       this.dead = true;
       this.log('扩展上下文失效，停止工作:', reason || '');
-      if (this.tickTimer) clearInterval(this.tickTimer);
-      if (this.scanTimer) clearTimeout(this.scanTimer);
-      if (this.observer) this.observer.disconnect();
-      this.tickTimer = null;
-      this.scanTimer = null;
-      this.observer = null;
       if (IS_TOP) {
         this.status.phase = 'dead';
         this.status.detail = '扩展已失效，请刷新本页';
+        this.status.updatedAt = Date.now();
+        try {
+          chrome.storage.local.set({
+            [STATUS_KEY]: { ...this.status, stats: this.stats }
+          });
+        } catch (_) {}
         try {
           this.ensureHud();
           this.updateHud();
           this.showToast('扩展已失效，请刷新课程页');
         } catch (_) {}
       }
+      if (this.tickTimer) clearInterval(this.tickTimer);
+      if (this.scanTimer) clearTimeout(this.scanTimer);
+      if (this.observer) this.observer.disconnect();
+      this.tickTimer = null;
+      this.scanTimer = null;
+      this.observer = null;
     }
 
     ensureAlive() {
@@ -369,13 +375,30 @@
     applyFrameStatus(payload, force = false) {
       if (!IS_TOP || !payload || typeof payload !== 'object') return;
 
-      // 仅在暂停时锁定文案；运行中允许 iframe 更新 phase/detail
+      // 暂停时默认只同步进度；若 iframe 带来保护相位，补齐暂停原因
       if (!this.settings.isRunning) {
         if (typeof payload.progress === 'number') {
           this.status.progress = payload.progress;
         }
         if (typeof payload.hasVideo === 'boolean') {
           this.status.hasVideo = payload.hasVideo;
+        }
+        if (
+          payload.phase &&
+          isProtectedStatusPhase(payload.phase) &&
+          typeof payload.detail === 'string' &&
+          payload.detail
+        ) {
+          const prevDetail = this.status.detail;
+          this.status.phase = payload.phase;
+          this.status.detail = payload.detail;
+          this.status.updatedAt = Date.now();
+          this.updateHud();
+          this.publishStatus(true);
+          if (shouldLogStatusChange(prevDetail, payload.detail)) {
+            this.pushLog(payload.detail);
+          }
+          return;
         }
         this.status.updatedAt = Date.now();
         this.updateHudProgressOnly();
@@ -626,6 +649,19 @@
       if (!this.settings.isRunning || this.limitPausePending || !this.ensureAlive()) return;
       this.limitPausePending = true;
       try {
+        if (!IS_TOP) {
+          this.settings.isRunning = false;
+          this.status.phase = phase;
+          this.status.detail = reason;
+          this.status.updatedAt = Date.now();
+          try {
+            window.parent.postMessage(
+              { type: 'XXT_PAUSE_FOR_REASON', reason, phase },
+              '*'
+            );
+          } catch (_) {}
+          return;
+        }
         this.setStatus(phase, reason);
         this.showToast(reason);
         this.pushLog(reason);
@@ -671,9 +707,10 @@
       const root = document.createElement('div');
       root.id = 'xxt-assistant-hud';
       root.innerHTML = `
-        <div data-role="compact-view" style="display:none;align-items:center;gap:10px;cursor:pointer;">
+        <div data-role="compact-view" style="display:none;align-items:center;gap:8px;cursor:pointer;">
           <strong style="font-size:13px;letter-spacing:0.2px;">学习通助手</strong>
-          <span data-role="compact-meta" style="opacity:0.8;font-family:'Avenir Next','PingFang SC',sans-serif;"></span>
+          <span data-role="compact-meta" style="opacity:0.8;font-family:'Avenir Next','PingFang SC',sans-serif;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+          <button data-role="compact-toggle" type="button" title="开始/暂停">开始</button>
         </div>
         <div data-role="full-view">
           <div data-role="drag" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;cursor:grab;">
@@ -748,7 +785,7 @@
     bindHudEvents(root) {
       const stop = e => e.stopPropagation();
 
-      root.querySelector('[data-role="toggle"]').addEventListener('click', async e => {
+      const toggleRun = async e => {
         stop(e);
         if (!this.ensureAlive()) return;
         try {
@@ -756,7 +793,10 @@
         } catch (error) {
           this.handleRuntimeError(error);
         }
-      });
+      };
+      root.querySelector('[data-role="toggle"]').addEventListener('click', toggleRun);
+      const compactToggle = root.querySelector('[data-role="compact-toggle"]');
+      if (compactToggle) compactToggle.addEventListener('click', toggleRun);
 
       root.querySelector('[data-role="hide"]').addEventListener('click', async e => {
         stop(e);
@@ -786,6 +826,10 @@
 
       root.querySelector('[data-role="next"]').addEventListener('click', e => {
         stop(e);
+        if (this.status.phase === 'verify') {
+          this.showToast('请先完成人工验证');
+          return;
+        }
         this.showToast('正在切换下一节…');
         this.requestNextChapter('hud-next', { force: true });
       });
@@ -938,16 +982,13 @@
       this.hud.style.minWidth = isCompact ? '0' : '228px';
       this.hud.style.padding = isCompact ? '10px 12px' : '12px 14px';
 
+      const compactToggle = this.hud.querySelector('[data-role="compact-toggle"]');
+      if (compactToggle) {
+        compactToggle.textContent = this.settings.isRunning ? '暂停' : '开始';
+      }
+
       if (isCompact) {
-        const bits = [];
-        if (!this.settings.isRunning && isProtectedStatusPhase(this.status.phase)) {
-          bits.push((this.status.detail || '已停止').slice(0, 18));
-        } else {
-          bits.push(this.settings.isRunning ? '运行中' : '已停止');
-        }
-        bits.push(`${this.settings.playbackSpeed}x`);
-        if (this.status.hasVideo) bits.push(`${pct}%`);
-        compactMeta.textContent = bits.join(' · ');
+        compactMeta.textContent = this.formatCompactMeta(pct);
         this.hud.style.opacity = this.settings.isRunning ? '1' : '0.75';
         return;
       }
@@ -983,6 +1024,18 @@
       meta.textContent = parts.join(' · ');
     }
 
+    formatCompactMeta(pct) {
+      const bits = [];
+      if (!this.settings.isRunning && isProtectedStatusPhase(this.status.phase)) {
+        bits.push((this.status.detail || '已停止').slice(0, 18));
+      } else {
+        bits.push(this.settings.isRunning ? '运行中' : '已停止');
+      }
+      bits.push(`${this.settings.playbackSpeed}x`);
+      if (this.status.hasVideo) bits.push(`${pct}%`);
+      return bits.join(' · ');
+    }
+
     updateHudProgressOnly() {
       if (!this.hud || !this.settings.showHud) return;
       const pct = formatProgress(this.status.progress);
@@ -996,12 +1049,7 @@
         meta.textContent = parts.join(' · ');
       }
       if (compactMeta && this.hudLayout.compact) {
-        const bits = [
-          this.settings.isRunning ? '运行中' : '已停止',
-          `${this.settings.playbackSpeed}x`,
-          `${pct}%`
-        ];
-        compactMeta.textContent = bits.join(' · ');
+        compactMeta.textContent = this.formatCompactMeta(pct);
       }
     }
 
@@ -1272,7 +1320,8 @@
       }
       this.verifyClearHintShown = true;
       this.showToast('验证弹窗已消失，可点开始继续');
-      this.setStatus('paused', '验证已消失，可点开始继续');
+      // 保留 verify 相位，便于弹窗/badge 继续显示“待验证”
+      this.setStatus('verify', '验证已消失，可点开始继续');
     }
 
     guardVideo(video) {
@@ -1713,6 +1762,11 @@
       player.updateHud();
     } else if (event.data.type === 'XXT_FRAME_STATUS') {
       player.applyFrameStatus(event.data.payload, !!event.data.force);
+    } else if (event.data.type === 'XXT_PAUSE_FOR_REASON') {
+      await player.pauseForReason(
+        event.data.reason || '已自动暂停',
+        event.data.phase || 'limit'
+      );
     }
   });
 

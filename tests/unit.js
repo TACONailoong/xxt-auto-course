@@ -133,6 +133,14 @@ test('hasVisibleManualVerification', () => {
   );
 });
 
+test('badgeForPausedPhase', () => {
+  assert.strictEqual(DOM.badgeForPausedPhase('verify').text, '验');
+  assert.strictEqual(DOM.badgeForPausedPhase('stall').text, '卡');
+  assert.strictEqual(DOM.badgeForPausedPhase('limit').text, '满');
+  assert.strictEqual(DOM.badgeForPausedPhase('done').text, '完');
+  assert.strictEqual(DOM.badgeForPausedPhase('').text, '停');
+});
+
 test('summarizeOptions', () => {
   const chips = DOM.summarizeOptions({
     autoAnswer: true,

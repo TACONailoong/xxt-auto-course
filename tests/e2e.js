@@ -122,6 +122,11 @@ function sleep(ms) {
       .catch(() => false);
     check('浮层支持下一节与重置会话', hasQuickActions);
 
+    const hasCompactToggle = await page
+      .$eval('#xxt-assistant-hud [data-role="compact-toggle"]', el => !!el)
+      .catch(() => false);
+    check('收起态提供快捷启停按钮', hasCompactToggle);
+
     let videoState = null;
     for (const f of page.frames()) {
       videoState = await f
@@ -243,7 +248,7 @@ function sleep(ms) {
       check('弹窗提供会话限流输入', maxChaptersExists && maxMinutesExists);
 
       const footerText = await popup.$eval('.footer', el => el.textContent);
-      check('弹窗版本为 1.12.0', footerText.includes('v1.12.0'), footerText);
+      check('弹窗版本为 1.13.0', footerText.includes('v1.13.0'), footerText);
 
       const liveProgressWidth = await popup.$eval('#liveProgress', el => el.style.width || '0%');
       const livePct = parseFloat(liveProgressWidth) || 0;
@@ -337,6 +342,28 @@ function sleep(ms) {
         /人工验证|人脸/.test(afterFace.detail),
       JSON.stringify({ ...afterFace, facePausedInStorage })
     );
+
+    if (faceWorker) {
+      const verifyBadge = await faceWorker.evaluate(async () => {
+        return await chrome.action.getBadgeText({});
+      });
+      check('验证暂停后 badge 为验', verifyBadge === '验', `badge=${verifyBadge}`);
+    }
+
+    // 弹窗应实时反映自动暂停相位
+    const popupLive = await browser.newPage();
+    await popupLive.goto(`chrome-extension://${extId}/popup.html`, {
+      waitUntil: 'load'
+    });
+    await sleep(1000);
+    const liveKicker = await popupLive.$eval('#nowKicker', el => el.textContent);
+    const liveStatus = await popupLive.$eval('#statusText', el => el.textContent);
+    check(
+      '弹窗实时显示待人工验证',
+      /待人工验证|验证/.test(liveKicker) && liveStatus.includes('停止'),
+      `kicker=${liveKicker}; status=${liveStatus}`
+    );
+    await popupLive.close();
 
     // 验证弹窗消失后提示可继续（不自动绕过）
     await page.evaluate(() => {

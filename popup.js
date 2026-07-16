@@ -48,6 +48,7 @@ let hintTimer = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
   bindEvents();
+  bindStorageSync();
   await loadSettings();
   await restoreMoreOpen();
   updateUI();
@@ -56,6 +57,32 @@ document.addEventListener('DOMContentLoaded', async () => {
   setInterval(refreshLiveStatus, 1500);
   setInterval(refreshLogs, 2000);
 });
+
+function bindStorageSync() {
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'sync') {
+        let changed = false;
+        for (const key of Object.keys(DEFAULT_SETTINGS)) {
+          if (changes[key]) {
+            settings[key] = changes[key].newValue;
+            changed = true;
+          }
+        }
+        if (changed) {
+          updateUI();
+          refreshLiveStatus();
+        }
+      }
+      if (area === 'local') {
+        if (changes[STATUS_KEY] || changes[STATS_KEY]) refreshLiveStatus();
+        if (changes[LOG_KEY]) refreshLogs();
+      }
+    });
+  } catch (error) {
+    console.error('监听存储变化失败:', error);
+  }
+}
 
 function bindEvents() {
   bindToggle('toggleAuto', 'isRunning');
@@ -259,31 +286,41 @@ async function refreshLiveStatus() {
 
     if (!status || Date.now() - (status.updatedAt || 0) > 15000) {
       liveChapter.textContent = '尚未连接课程页';
-      liveDetail.textContent = '打开学习通播放页后，这里会显示实时进度';
+      liveDetail.textContent =
+        status && status.phase === 'dead'
+          ? '扩展已失效，请刷新课程页'
+          : '打开学习通播放页后，这里会显示实时进度';
       liveProgress.style.width = '0%';
       nowPanel.classList.add('is-offline');
       nowPanel.classList.remove('is-online');
-      nowKicker.textContent = '等待连接';
+      nowKicker.textContent =
+        status && status.phase === 'dead' ? '请刷新页面' : '等待连接';
       if (remainRow) remainRow.hidden = true;
       return;
     }
 
+    // 优先用页面上报的开关状态，避免自动暂停后本地缓存滞后
+    const running =
+      typeof settings.isRunning === 'boolean'
+        ? settings.isRunning
+        : !!(status.settings && status.settings.isRunning);
+
     nowPanel.classList.remove('is-offline');
     nowPanel.classList.add('is-online');
     const phase = status.phase || '';
-    if (!settings.isRunning) {
+    if (!running) {
       if (phase === 'verify') nowKicker.textContent = '待人工验证';
       else if (phase === 'limit') nowKicker.textContent = '已达上限';
       else if (phase === 'done') nowKicker.textContent = '已学完';
       else if (phase === 'stall') nowKicker.textContent = '播放异常';
+      else if (phase === 'dead') nowKicker.textContent = '请刷新页面';
       else nowKicker.textContent = '已暂停';
     } else {
       nowKicker.textContent = '正在学习';
     }
     liveChapter.textContent = status.chapter || '未识别当前章节';
     const pct = formatProgress(status.progress);
-    const detail =
-      status.detail || (settings.isRunning ? '运行中' : '已暂停自动刷课');
+    const detail = status.detail || (running ? '运行中' : '已暂停自动刷课');
     const parts = [detail];
     if (status.hasVideo && pct > 0) parts.push(`${pct}%`);
     liveDetail.textContent = parts.join(' · ');
