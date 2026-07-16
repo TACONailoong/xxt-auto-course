@@ -248,7 +248,7 @@ function sleep(ms) {
       check('弹窗提供会话限流输入', maxChaptersExists && maxMinutesExists);
 
       const footerText = await popup.$eval('.footer', el => el.textContent);
-      check('弹窗版本为 1.13.0', footerText.includes('v1.13.0'), footerText);
+      check('弹窗版本为 1.14.0', footerText.includes('v1.14.0'), footerText);
 
       let livePct = 0;
       let liveProgressWidth = '0%';
@@ -415,6 +415,58 @@ function sleep(ms) {
       afterResume.toggle === '暂停' && !/人工验证/.test(afterResume.detail),
       JSON.stringify(afterResume)
     );
+
+    // 会话限流：成功切章达到上限后自动暂停
+    if (faceWorker) {
+      await faceWorker.evaluate(async () => {
+        await chrome.storage.local.set({
+          xxtSessionStats: {
+            nextCount: 0,
+            answerCount: 0,
+            startedAt: Date.now(),
+            activeMs: 0
+          }
+        });
+        await chrome.storage.sync.set({
+          maxChapters: 1,
+          isRunning: true,
+          stopWhenDone: false
+        });
+      });
+      await sleep(600);
+      await page.evaluate(() => window.__markFinished());
+      await sleep(7500);
+      const limitState = await faceWorker.evaluate(async () => {
+        const sync = await chrome.storage.sync.get({ isRunning: true });
+        const local = await chrome.storage.local.get([
+          'xxtRuntimeStatus',
+          'xxtSessionStats'
+        ]);
+        return {
+          isRunning: sync.isRunning,
+          phase: local.xxtRuntimeStatus && local.xxtRuntimeStatus.phase,
+          detail: local.xxtRuntimeStatus && local.xxtRuntimeStatus.detail,
+          nextCount: local.xxtSessionStats && local.xxtSessionStats.nextCount,
+          badge: await chrome.action.getBadgeText({})
+        };
+      });
+      check(
+        '达到切章上限后自动暂停',
+        limitState.isRunning === false &&
+          limitState.phase === 'limit' &&
+          limitState.badge === '满' &&
+          Number(limitState.nextCount) >= 1,
+        JSON.stringify(limitState)
+      );
+      await faceWorker.evaluate(async () => {
+        await chrome.storage.sync.set({
+          maxChapters: 0,
+          isRunning: true,
+          stopWhenDone: true
+        });
+      });
+      await sleep(500);
+    }
 
     // 测验页跳过
     const quizPage = await browser.newPage();

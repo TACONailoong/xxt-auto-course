@@ -307,6 +307,13 @@ body::before {
   color: var(--muted);
 }
 
+.limit-live {
+  margin: 2px 0 10px;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .progress {
   margin-top: 10px;
   height: 5px;

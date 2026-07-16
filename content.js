@@ -35,8 +35,11 @@
   const isExtensionAlive = DOM.isExtensionAlive || (() => true);
   const formatSessionStats =
     DOM.formatSessionStats ||
-    ((stats) =>
+    ((stats, _now, settings) =>
       `本会话 · 切章 ${stats.nextCount || 0} · 答题 ${stats.answerCount || 0}`);
+  const recoverStepLabel =
+    DOM.recoverStepLabel ||
+    (level => ['点击播放', '静音重试', '微调进度', '重新加载'][Math.max(0, (level || 1) - 1)]);
   const createEmptyStats =
     DOM.createEmptyStats || (() => ({ nextCount: 0, answerCount: 0, startedAt: Date.now() }));
   const countRemainingCatalog = DOM.countRemainingCatalog || (() => 0);
@@ -108,6 +111,7 @@
       this.lastVerifyCheckAt = 0;
       this.verifyClearHintShown = false;
       this.recoverFailCycles = 0;
+      this.goodPlaySince = 0;
       this.status = {
         phase: 'idle',
         detail: '等待课程页面…',
@@ -266,6 +270,13 @@
                   this.showToast('已开始自动刷课');
                   this.publishStatus(true);
                 } else if (!this.limitPausePending) {
+                  if (!isProtectedStatusPhase(this.status.phase)) {
+                    this.status.phase = 'paused';
+                    this.status.detail = '已暂停自动刷课';
+                    this.status.updatedAt = Date.now();
+                    this.updateHud();
+                    this.publishStatus(true);
+                  }
                   this.showToast('已暂停自动刷课');
                 }
               }
@@ -834,8 +845,8 @@
           this.showToast('请先完成人工验证');
           return;
         }
-        this.showToast('正在切换下一节…');
-        this.requestNextChapter('hud-next', { force: true });
+        const scheduled = this.requestNextChapter('hud-next', { force: true });
+        this.showToast(scheduled ? '正在切换下一节…' : '切章冷却中，请稍候');
       });
 
       root.querySelector('[data-role="reset-stats"]').addEventListener('click', async e => {
@@ -845,8 +856,8 @@
         this.lastActiveTickAt = 0;
         this.hadRemaining = false;
         await this.persistStats();
-        this.showToast('会话统计已重置');
-        this.pushLog('已重置会话统计');
+        this.showToast('已重置统计与限流计数');
+        this.pushLog('已重置会话统计与限流计数');
         this.updateHud();
         this.publishStatus(true);
       });
@@ -1004,7 +1015,11 @@
         typeof this.status.remaining === 'number'
           ? ` · 剩余 ${this.status.remaining}`
           : '';
-      stats.textContent = `${formatSessionStats(this.stats)}${remainText}`;
+      stats.textContent = `${formatSessionStats(
+        this.stats,
+        Date.now(),
+        this.settings
+      )}${remainText}`;
 
       if (!this.settings.isRunning || this.status.phase === 'dead') {
         const keepReason =
@@ -1013,9 +1028,17 @@
         meta.textContent =
           this.status.phase === 'dead'
             ? '请刷新课程页后重新启用'
-            : keepReason
-              ? '可点“开始”继续，或重置会话统计后继续'
-              : '点击“开始”或在扩展弹窗中开启';
+            : this.status.phase === 'stall'
+              ? '可点“开始”重试播放'
+              : this.status.phase === 'limit'
+                ? '重置会话统计后可继续'
+                : this.status.phase === 'verify'
+                  ? '完成验证后点“开始”继续'
+                  : this.status.phase === 'done'
+                    ? '目录已学完'
+                    : keepReason
+                      ? '可点“开始”继续'
+                      : '点击“开始”或在扩展弹窗中开启';
         this.hud.style.opacity = '0.75';
         return;
       }
@@ -1101,13 +1124,12 @@
         if (this.settings.isRunning) {
           video.playbackRate = this.settings.playbackSpeed;
           if (this.settings.mute) video.muted = true;
-          this.recoverLevel = 0;
           this.setStatus('playing', '正在播放', { hasVideo: true });
         }
       });
 
       video.addEventListener('playing', () => {
-        this.recoverLevel = 0;
+        if (!this.goodPlaySince) this.goodPlaySince = Date.now();
       });
 
       video.addEventListener('waiting', () => this.onVideoBuffering(video));
@@ -1139,6 +1161,8 @@
       video.addEventListener('ended', () => {
         this.log('视频播放完成');
         this.recoverLevel = 0;
+        this.recoverFailCycles = 0;
+        this.goodPlaySince = 0;
         this.setStatus('next', '视频结束，准备下一节', { hasVideo: true, progress: 1 });
         if (this.settings.isRunning && this.settings.autoNext) {
           setTimeout(
@@ -1158,7 +1182,6 @@
     onVideoBuffering(video) {
       if (!this.settings.isRunning || !video || video.ended) return;
       if (Date.now() - this.lastRecoverAt < 3000) return;
-      this.setStatus('recover', '播放卡顿，正在恢复…', { hasVideo: true });
       this.recoverVideo(video, 'buffer');
     }
 
@@ -1167,9 +1190,15 @@
       const now = Date.now();
       if (now - this.lastRecoverAt < 2500) return;
       this.lastRecoverAt = now;
+      this.goodPlaySince = 0;
       this.recoverLevel = Math.min((this.recoverLevel || 0) + 1, 4);
-      this.log('恢复播放:', reason, 'level', this.recoverLevel);
-      this.setStatus('recover', '播放卡顿，正在恢复…', { hasVideo: true });
+      const step = recoverStepLabel(this.recoverLevel);
+      this.log('恢复播放:', reason, 'level', this.recoverLevel, step);
+      this.setStatus(
+        'recover',
+        `播放卡顿，恢复 ${this.recoverLevel}/4（${step}）`,
+        { hasVideo: true }
+      );
 
       if (this.recoverLevel <= 1) {
         this.clickPlayOverlay();
@@ -1342,6 +1371,7 @@
         const now = Date.now();
         const t = video.currentTime || 0;
         if (Math.abs(t - this.stallLastTime) < 0.05) {
+          this.goodPlaySince = 0;
           if (this.stallLastWall && now - this.stallLastWall >= 8000) {
             this.log('检测到播放卡顿，尝试恢复');
             this.recoverVideo(video, 'stall');
@@ -1350,17 +1380,23 @@
         } else {
           this.stallLastTime = t;
           this.stallLastWall = now;
-          if (this.recoverLevel > 0 || this.recoverFailCycles > 0) {
+          if (!this.goodPlaySince) this.goodPlaySince = now;
+          // 连续正常播放约 2 秒后再清零恢复计数，避免微小跳动误重置
+          if (
+            (this.recoverLevel > 0 || this.recoverFailCycles > 0) &&
+            now - this.goodPlaySince >= 2000
+          ) {
             this.recoverLevel = 0;
             this.recoverFailCycles = 0;
           }
         }
 
         const progress = video.duration ? t / video.duration : this.status.progress;
-        // 仅在文案变化时打完整状态，避免每秒刷日志
-        if (this.status.detail !== '正在播放') {
-          this.setStatus('playing', '正在播放', { hasVideo: true, progress });
-        } else {
+        const playingDetail = '正在播放';
+        const recovering = String(this.status.detail || '').includes('恢复');
+        if (!recovering && this.status.detail !== playingDetail) {
+          this.setStatus('playing', playingDetail, { hasVideo: true, progress });
+        } else if (!recovering) {
           this.setProgress(progress);
         }
       }
@@ -1656,38 +1692,105 @@
     }
 
     requestNextChapter(reason, { force = false } = {}) {
-      if (!force && !this.settings.autoNext) return;
-      if (this.nextPending || Date.now() - this.lastNextAt < 4000) return;
+      if (!force && !this.settings.autoNext) return false;
+      if (this.nextPending || Date.now() - this.lastNextAt < 4000) return false;
       this.nextPending = true;
       this.lastNextAt = Date.now();
       this.log('请求切换下一章:', reason);
 
-      const run = () => {
-        if (IS_TOP) {
-          const moved = this.goToNextChapter(reason);
-          if (moved) this.bumpStat('nextCount');
-        } else {
-          try {
-            window.parent.postMessage({ type: 'XXT_GO_NEXT_CHAPTER', reason }, '*');
-          } catch (error) {
-            this.log('通知顶层切换失败:', error);
+      const run = async () => {
+        try {
+          if (IS_TOP) {
+            await this.performNextChapter(reason);
+          } else {
+            try {
+              window.parent.postMessage({ type: 'XXT_GO_NEXT_CHAPTER', reason }, '*');
+            } catch (error) {
+              this.log('通知顶层切换失败:', error);
+            }
           }
+        } finally {
+          setTimeout(() => {
+            this.nextPending = false;
+          }, 1200);
         }
-        setTimeout(() => {
-          this.nextPending = false;
-        }, 4000);
       };
 
       setTimeout(run, randomDelay(200, 800));
+      return true;
     }
 
-    goToNextChapter(reason = '') {
-      if (this.dismissJobFinishTip()) return true;
+    getActiveChapterKey() {
+      const name = document.querySelector('.posCatalog_active .posCatalog_name');
+      return name
+        ? (name.getAttribute('title') || name.textContent || '').trim()
+        : '';
+    }
 
-      if (reason !== 'chapter-test') {
-        if (this.clickNextCatalogItem()) return true;
+    waitForChapterChange(beforeKey, timeoutMs = 4000) {
+      return new Promise(resolve => {
+        const start = Date.now();
+        const timer = setInterval(() => {
+          const nowKey = this.getActiveChapterKey();
+          if (nowKey && beforeKey && nowKey !== beforeKey) {
+            clearInterval(timer);
+            resolve(true);
+            return;
+          }
+          // 无目录时退化为标题变化或超时
+          if (!beforeKey && nowKey) {
+            clearInterval(timer);
+            resolve(true);
+            return;
+          }
+          if (Date.now() - start >= timeoutMs) {
+            clearInterval(timer);
+            resolve(false);
+          }
+        }, 250);
+      });
+    }
+
+    async performNextChapter(reason = '') {
+      const before = this.getActiveChapterKey();
+      const result = this.goToNextChapter(reason);
+      if (result === 'done') return false;
+      if (result !== 'clicked') return false;
+
+      // 测验页或无目录时：点击即视为成功
+      if (reason === 'chapter-test' || !before) {
+        this.setStatus('next', '已切换到下一节');
+        await this.bumpStat('nextCount');
+        return true;
       }
 
+      let confirmed = await this.waitForChapterChange(before, 3500);
+      if (!confirmed) {
+        this.log('切章未确认，尝试备用入口');
+        this.clickNextNavButton();
+        this.clickNextCatalogItem();
+        confirmed = await this.waitForChapterChange(before, 2500);
+      }
+
+      if (confirmed) {
+        const title = this.refreshChapterTitle() || this.getActiveChapterKey();
+        this.setStatus('next', '已确认切换到下一节', { chapter: title });
+        await this.bumpStat('nextCount');
+        return true;
+      }
+
+      this.refreshRemaining();
+      if (this.status.remaining === 0 && this.hadRemaining && this.settings.stopWhenDone) {
+        await this.pauseForReason('目录已全部完成，已自动暂停', 'done');
+        return false;
+      }
+
+      this.setStatus('stuck', '切章未生效，请手动点下一节或刷新');
+      this.showToast('切章可能未生效，请手动切换');
+      return false;
+    }
+
+    clickNextNavButton() {
       const nextSelectors = [
         '#prevNextFocusNext',
         '#right1',
@@ -1704,19 +1807,43 @@
         if (btn && isVisible(btn)) {
           this.log('点击下一节按钮:', selector);
           safeClick(btn);
-          this.setStatus('next', '已切换到下一节');
           return true;
         }
       }
+      return false;
+    }
 
-      if (reason === 'chapter-test' && this.clickNextCatalogItem()) return true;
-
-      this.log('未找到下一章节入口，可能已学完');
-      this.setStatus('done', '未找到下一节，可能已全部完成');
-      this.showToast('没有更多未完成小节了');
-      if (this.settings.stopWhenDone) {
-        this.pauseForReason('目录已全部完成，已自动暂停', 'done');
+    goToNextChapter(reason = '') {
+      if (this.dismissJobFinishTip()) {
+        this.setStatus('next', '正在切换下一节…');
+        return 'clicked';
       }
+
+      if (reason !== 'chapter-test') {
+        if (this.clickNextCatalogItem()) return 'clicked';
+      }
+
+      if (this.clickNextNavButton()) {
+        this.setStatus('next', '正在切换下一节…');
+        return 'clicked';
+      }
+
+      if (reason === 'chapter-test' && this.clickNextCatalogItem()) return 'clicked';
+
+      this.refreshRemaining();
+      if (typeof this.status.remaining === 'number' && this.status.remaining === 0) {
+        this.log('未找到下一章节入口，可能已学完');
+        this.setStatus('done', '未找到下一节，可能已全部完成');
+        this.showToast('没有更多未完成小节了');
+        if (this.settings.stopWhenDone) {
+          this.pauseForReason('目录已全部完成，已自动暂停', 'done');
+        }
+        return 'done';
+      }
+
+      this.log('未找到下一章节入口');
+      this.setStatus('stuck', '未找到可用下一节入口');
+      this.showToast('未找到下一节，可手动切换');
       return false;
     }
 
@@ -1745,11 +1872,10 @@
       if (!picked || !picked.item || !picked.item.nameEl) return false;
 
       const name = picked.item.nameEl;
-      this.log('目录切换到:', name.getAttribute('title') || name.textContent);
+      const title = (name.getAttribute('title') || name.textContent || '').trim();
+      this.log('目录切换到:', title);
       safeClick(name);
-      this.setStatus('next', '已从目录进入下一节', {
-        chapter: (name.getAttribute('title') || name.textContent || '').trim()
-      });
+      this.setStatus('next', '正在切换下一节…', { chapter: title });
       return true;
     }
   }

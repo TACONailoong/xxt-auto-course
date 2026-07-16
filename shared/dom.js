@@ -83,7 +83,7 @@ function xxtFormatDuration(ms) {
   return `${s}秒`;
 }
 
-function xxtFormatSessionStats(stats, now = Date.now()) {
+function xxtFormatSessionStats(stats, now = Date.now(), settings = null) {
   const nextCount = Number(stats && stats.nextCount) || 0;
   const answerCount = Number(stats && stats.answerCount) || 0;
   const startedAt = Number(stats && stats.startedAt) || now;
@@ -91,7 +91,28 @@ function xxtFormatSessionStats(stats, now = Date.now()) {
   const durationMs =
     Number.isFinite(activeMs) && activeMs >= 0 ? activeMs : now - startedAt;
   const duration = xxtFormatDuration(durationMs);
+  const maxChapters = Number(settings && settings.maxChapters) || 0;
+  const maxMinutes = Number(settings && settings.maxMinutes) || 0;
+  if (maxChapters > 0 || maxMinutes > 0) {
+    const parts = [`本会话 · ${duration}`];
+    if (maxChapters > 0) parts.push(`切章 ${nextCount}/${maxChapters}`);
+    else parts.push(`切章 ${nextCount}`);
+    if (maxMinutes > 0) {
+      const usedMin = Math.floor(
+        Math.max(0, Number.isFinite(activeMs) ? activeMs : 0) / 60000
+      );
+      parts.push(`活跃 ${usedMin}/${maxMinutes}分`);
+    }
+    parts.push(`答题 ${answerCount}`);
+    return parts.join(' · ');
+  }
   return `本会话 · ${duration} · 切章 ${nextCount} · 答题 ${answerCount}`;
+}
+
+function xxtRecoverStepLabel(level) {
+  const labels = ['点击播放', '静音重试', '微调进度', '重新加载'];
+  const idx = Math.max(1, Math.min(4, Number(level) || 1)) - 1;
+  return labels[idx];
 }
 
 function xxtIsManualVerificationText(text) {
@@ -243,6 +264,7 @@ const XXT_DOM = {
   isExtensionAlive: xxtIsExtensionAlive,
   formatDuration: xxtFormatDuration,
   formatSessionStats: xxtFormatSessionStats,
+  recoverStepLabel: xxtRecoverStepLabel,
   summarizeOptions: xxtSummarizeOptions,
   isHighSpeed: xxtIsHighSpeed,
   createEmptyStats: xxtCreateEmptyStats,
@@ -271,6 +293,7 @@ if (typeof globalThis !== 'undefined') {
     xxtIsExtensionAlive,
     xxtFormatDuration,
     xxtFormatSessionStats,
+    xxtRecoverStepLabel,
     xxtSummarizeOptions,
     xxtIsHighSpeed,
     xxtCreateEmptyStats,

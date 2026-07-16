@@ -92,6 +92,12 @@ const topPage = `<!DOCTYPE html>
     document.querySelectorAll('#coursetree .posCatalog_name').forEach(el => {
       el.addEventListener('click', () => {
         window.__catalogClicked = el.getAttribute('title');
+        // 真实切换当前小节，供切章确认逻辑检测
+        document
+          .querySelectorAll('#coursetree .posCatalog_select')
+          .forEach(n => n.classList.remove('posCatalog_active'));
+        const row = el.closest('.posCatalog_select');
+        if (row) row.classList.add('posCatalog_active');
       });
     });
     // 供测试主动触发切章：标记当前任务完成

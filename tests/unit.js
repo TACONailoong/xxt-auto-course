@@ -102,6 +102,21 @@ test('formatSessionStats', () => {
   assert.ok(text.includes('5秒'), text);
 });
 
+test('formatSessionStats 含限流配额', () => {
+  const text = DOM.formatSessionStats(
+    { nextCount: 2, answerCount: 1, startedAt: Date.now(), activeMs: 120000 },
+    Date.now(),
+    { maxChapters: 5, maxMinutes: 30 }
+  );
+  assert.ok(text.includes('切章 2/5'), text);
+  assert.ok(text.includes('活跃 2/30分'), text);
+});
+
+test('recoverStepLabel', () => {
+  assert.strictEqual(DOM.recoverStepLabel(1), '点击播放');
+  assert.strictEqual(DOM.recoverStepLabel(4), '重新加载');
+});
+
 test('isManualVerificationText', () => {
   assert.strictEqual(DOM.isManualVerificationText('请完成人脸识别'), true);
   assert.strictEqual(DOM.isManualVerificationText('安全验证'), true);

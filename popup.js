@@ -211,8 +211,8 @@ async function resetSessionStats() {
   try {
     await chrome.storage.local.set({ [STATS_KEY]: empty });
     const statsRow = document.getElementById('statsRow');
-    if (statsRow) statsRow.textContent = formatSessionStats(empty);
-    showSaveHint('会话统计已重置');
+    if (statsRow) statsRow.textContent = formatSessionStats(empty, Date.now(), settings);
+    showSaveHint('已重置统计与限流计数');
   } catch (error) {
     console.error('重置统计失败:', error);
   }
@@ -282,7 +282,24 @@ async function refreshLiveStatus() {
     const result = await chrome.storage.local.get([STATUS_KEY, STATS_KEY]);
     const status = result[STATUS_KEY];
     const stats = result[STATS_KEY] || (status && status.stats) || createEmptyStats();
-    statsRow.textContent = formatSessionStats(stats);
+    statsRow.textContent = formatSessionStats(stats, Date.now(), settings);
+    const limitLive = document.getElementById('limitLive');
+    if (limitLive) {
+      const maxChapters = Number(settings.maxChapters) || 0;
+      const maxMinutes = Number(settings.maxMinutes) || 0;
+      if (maxChapters > 0 || maxMinutes > 0) {
+        limitLive.hidden = false;
+        const usedMin = Math.floor((Number(stats.activeMs) || 0) / 60000);
+        const bits = [];
+        if (maxChapters > 0) {
+          bits.push(`切章 ${Number(stats.nextCount) || 0}/${maxChapters}`);
+        }
+        if (maxMinutes > 0) bits.push(`活跃 ${usedMin}/${maxMinutes} 分`);
+        limitLive.textContent = `限流进度：${bits.join(' · ')}`;
+      } else {
+        limitLive.hidden = true;
+      }
+    }
 
     if (!status || Date.now() - (status.updatedAt || 0) > 15000) {
       liveChapter.textContent = '尚未连接课程页';
@@ -315,6 +332,10 @@ async function refreshLiveStatus() {
       else if (phase === 'stall') nowKicker.textContent = '播放异常';
       else if (phase === 'dead') nowKicker.textContent = '请刷新页面';
       else nowKicker.textContent = '已暂停';
+    } else if (phase === 'stuck') {
+      nowKicker.textContent = '切章异常';
+    } else if (phase === 'recover') {
+      nowKicker.textContent = '恢复播放中';
     } else {
       nowKicker.textContent = '正在学习';
     }
