@@ -32,9 +32,9 @@
       </div>
     </header>
 
-    <section class="now" aria-label="当前状态">
+    <section class="now is-offline" id="nowPanel" aria-label="当前状态">
       <div class="now-top">
-        <span class="now-kicker">正在学习</span>
+        <span class="now-kicker" id="nowKicker">等待连接</span>
         <span class="now-meta" id="speedValue">1.5x</span>
       </div>
       <h2 class="now-chapter" id="liveChapter">尚未连接课程页</h2>
@@ -42,6 +42,7 @@
       <div class="progress" aria-hidden="true">
         <span id="liveProgress"></span>
       </div>
+      <div class="stats-row" id="statsRow">本会话 · 切章 0 · 答题 0</div>
     </section>
 
     <section class="speed" aria-label="播放倍速">
@@ -129,7 +130,7 @@
     </section>
 
     <p class="save-hint" id="saveHint" role="status">已自动保存</p>
-    <footer class="footer">v1.5.0 · 仅供学习交流</footer>
+    <footer class="footer">v1.6.0 · 仅供学习交流</footer>
   </main>
 
   <!-- 兼容旧测试选择器 -->

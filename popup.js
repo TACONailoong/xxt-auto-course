@@ -16,6 +16,9 @@ const DEFAULT_SETTINGS =
 const STATUS_KEY =
   (typeof XXT_STATUS_KEY !== 'undefined' && XXT_STATUS_KEY) || 'xxtRuntimeStatus';
 const LOG_KEY = (typeof XXT_LOG_KEY !== 'undefined' && XXT_LOG_KEY) || 'xxtActivityLog';
+const STATS_KEY = (typeof XXT_STATS_KEY !== 'undefined' && XXT_STATS_KEY) || 'xxtSessionStats';
+const MORE_OPEN_KEY =
+  (typeof XXT_MORE_OPEN_KEY !== 'undefined' && XXT_MORE_OPEN_KEY) || 'xxtMoreOpen';
 const formatProgress =
   (typeof xxtFormatProgress === 'function' && xxtFormatProgress) ||
   (p => Math.round((Number(p) || 0) * 100));
@@ -27,6 +30,7 @@ let hintTimer = null;
 document.addEventListener('DOMContentLoaded', async () => {
   bindEvents();
   await loadSettings();
+  await restoreMoreOpen();
   updateUI();
   await refreshLiveStatus();
   await refreshLogs();
@@ -64,6 +68,24 @@ function bindEvents() {
       await refreshLogs();
     });
   }
+
+  const more = document.getElementById('moreSettings');
+  if (more) {
+    more.addEventListener('toggle', async () => {
+      try {
+        await chrome.storage.local.set({ [MORE_OPEN_KEY]: more.open });
+      } catch (_) {}
+    });
+  }
+}
+
+async function restoreMoreOpen() {
+  const more = document.getElementById('moreSettings');
+  if (!more) return;
+  try {
+    const result = await chrome.storage.local.get(MORE_OPEN_KEY);
+    if (result[MORE_OPEN_KEY]) more.open = true;
+  } catch (_) {}
 }
 
 function bindToggle(elementId, key) {
@@ -112,15 +134,31 @@ async function refreshLiveStatus() {
   const liveDetail = document.getElementById('liveDetail');
   const liveChapter = document.getElementById('liveChapter');
   const liveProgress = document.getElementById('liveProgress');
+  const nowPanel = document.getElementById('nowPanel');
+  const nowKicker = document.getElementById('nowKicker');
+  const statsRow = document.getElementById('statsRow');
+
   try {
-    const result = await chrome.storage.local.get(STATUS_KEY);
+    const result = await chrome.storage.local.get([STATUS_KEY, STATS_KEY]);
     const status = result[STATUS_KEY];
+    const stats = result[STATS_KEY] || (status && status.stats) || {};
+    const nextCount = Number(stats.nextCount) || 0;
+    const answerCount = Number(stats.answerCount) || 0;
+    statsRow.textContent = `本会话 · 切章 ${nextCount} · 答题 ${answerCount}`;
+
     if (!status || Date.now() - (status.updatedAt || 0) > 15000) {
       liveChapter.textContent = '尚未连接课程页';
       liveDetail.textContent = '打开学习通播放页后，这里会显示实时进度';
       liveProgress.style.width = '0%';
+      nowPanel.classList.add('is-offline');
+      nowPanel.classList.remove('is-online');
+      nowKicker.textContent = '等待连接';
       return;
     }
+
+    nowPanel.classList.remove('is-offline');
+    nowPanel.classList.add('is-online');
+    nowKicker.textContent = settings.isRunning ? '正在学习' : '已暂停';
     liveChapter.textContent = status.chapter || '未识别当前章节';
     const pct = formatProgress(status.progress);
     const parts = [status.detail || '运行中'];
@@ -130,6 +168,8 @@ async function refreshLiveStatus() {
   } catch (error) {
     liveChapter.textContent = '状态读取失败';
     liveDetail.textContent = '请重新打开扩展弹窗试试';
+    nowPanel.classList.add('is-offline');
+    nowPanel.classList.remove('is-online');
   }
 }
 

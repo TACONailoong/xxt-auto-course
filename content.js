@@ -36,6 +36,9 @@
     (typeof XXT_STATUS_KEY !== 'undefined' && XXT_STATUS_KEY) || 'xxtRuntimeStatus';
   const LOG_KEY = (typeof XXT_LOG_KEY !== 'undefined' && XXT_LOG_KEY) || 'xxtActivityLog';
   const LOG_LIMIT = (typeof XXT_LOG_LIMIT !== 'undefined' && XXT_LOG_LIMIT) || 40;
+  const HUD_LAYOUT_KEY =
+    (typeof XXT_HUD_LAYOUT_KEY !== 'undefined' && XXT_HUD_LAYOUT_KEY) || 'xxtHudLayout';
+  const STATS_KEY = (typeof XXT_STATS_KEY !== 'undefined' && XXT_STATS_KEY) || 'xxtSessionStats';
 
   class XueXiTongAutoPlayer {
     constructor() {
@@ -54,6 +57,10 @@
       this.stallLastTime = 0;
       this.stallLastWall = 0;
       this.dead = false;
+      this.hudLayout = { left: null, top: null, compact: false };
+      this.stats = { nextCount: 0, answerCount: 0, startedAt: Date.now() };
+      this.dragState = null;
+      this.hudDragBound = false;
       this.status = {
         phase: 'idle',
         detail: '等待课程页面…',
@@ -68,6 +75,10 @@
 
     async init() {
       await this.loadSettings();
+      if (IS_TOP) {
+        await this.loadHudLayout();
+        await this.loadStats();
+      }
       this.watchSettingsChanges();
       this.startObserver();
       this.tickTimer = setInterval(() => this.tick(), 1500);
@@ -184,6 +195,7 @@
         await chrome.storage.local.set({
           [STATUS_KEY]: {
             ...this.status,
+            stats: this.stats,
             settings: {
               isRunning: this.settings.isRunning,
               playbackSpeed: this.settings.playbackSpeed
@@ -229,6 +241,62 @@
 
     // ---------- HUD ----------
 
+    async loadHudLayout() {
+      try {
+        const result = await chrome.storage.local.get(HUD_LAYOUT_KEY);
+        const layout = result[HUD_LAYOUT_KEY];
+        if (layout && typeof layout === 'object') {
+          this.hudLayout = {
+            left: Number.isFinite(layout.left) ? layout.left : null,
+            top: Number.isFinite(layout.top) ? layout.top : null,
+            compact: !!layout.compact
+          };
+        }
+      } catch (_) {}
+    }
+
+    async saveHudLayout() {
+      if (!this.ensureAlive()) return;
+      try {
+        await chrome.storage.local.set({ [HUD_LAYOUT_KEY]: this.hudLayout });
+      } catch (error) {
+        this.markDead(error && error.message);
+      }
+    }
+
+    async loadStats() {
+      try {
+        const result = await chrome.storage.local.get(STATS_KEY);
+        const stats = result[STATS_KEY];
+        if (stats && typeof stats === 'object') {
+          this.stats = {
+            nextCount: Number(stats.nextCount) || 0,
+            answerCount: Number(stats.answerCount) || 0,
+            startedAt: Number(stats.startedAt) || Date.now()
+          };
+        } else {
+          await this.persistStats();
+        }
+      } catch (_) {}
+    }
+
+    async persistStats() {
+      if (!IS_TOP || !this.ensureAlive()) return;
+      try {
+        await chrome.storage.local.set({ [STATS_KEY]: this.stats });
+      } catch (error) {
+        this.markDead(error && error.message);
+      }
+    }
+
+    async bumpStat(key) {
+      if (!IS_TOP) return;
+      this.stats[key] = (this.stats[key] || 0) + 1;
+      await this.persistStats();
+      this.publishStatus(true);
+      this.updateHud();
+    }
+
     ensureHud() {
       if (!IS_TOP || !document.documentElement) return;
 
@@ -243,10 +311,38 @@
 
       const root = document.createElement('div');
       root.id = 'xxt-assistant-hud';
+      root.innerHTML = `
+        <div data-role="compact-view" style="display:none;align-items:center;gap:10px;cursor:pointer;">
+          <strong style="font-size:13px;letter-spacing:0.2px;">学习通助手</strong>
+          <span data-role="compact-meta" style="opacity:0.8;font-family:'Avenir Next','PingFang SC',sans-serif;"></span>
+        </div>
+        <div data-role="full-view">
+          <div data-role="drag" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;cursor:grab;">
+            <div style="font-weight:700;font-size:14px;letter-spacing:0.3px;">学习通助手</div>
+            <div style="display:flex;gap:6px;">
+              <button data-role="compact" type="button" title="收起">收起</button>
+              <button data-role="toggle" type="button">暂停</button>
+              <button data-role="hide" type="button">隐藏</button>
+            </div>
+          </div>
+          <div data-role="chapter" style="opacity:0.78;font-size:11px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+          <div data-role="detail" style="opacity:0.96;line-height:1.4;font-family:'Avenir Next','PingFang SC',sans-serif;">初始化中…</div>
+          <div data-role="bar" style="margin-top:9px;height:4px;background:rgba(255,255,255,0.18);border-radius:2px;overflow:hidden;">
+            <div data-role="bar-fill" style="height:100%;width:0%;background:#7dd3b5;transition:width 0.25s ease;"></div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;font-family:'Avenir Next','PingFang SC',sans-serif;">
+            <div data-role="meta" style="opacity:0.72;"></div>
+            <div style="display:flex;gap:4px;">
+              <button data-role="speed-down" type="button" title="减速">−</button>
+              <button data-role="speed-up" type="button" title="加速">+</button>
+            </div>
+          </div>
+          <div data-role="stats" style="margin-top:6px;opacity:0.68;font-size:11px;font-family:'Avenir Next','PingFang SC',sans-serif;"></div>
+        </div>
+      `;
+
       Object.assign(root.style, {
         position: 'fixed',
-        right: '16px',
-        bottom: '16px',
         zIndex: '2147483646',
         fontFamily:
           '"Source Han Serif SC","Noto Serif CJK SC","Songti SC","PingFang SC",serif',
@@ -259,29 +355,38 @@
         boxShadow: '0 10px 28px rgba(20,35,31,0.28)',
         backdropFilter: 'blur(10px)',
         minWidth: '228px',
-        maxWidth: '290px',
+        maxWidth: '300px',
         pointerEvents: 'auto',
-        transition: 'opacity 0.2s ease, transform 0.2s ease',
+        transition: 'opacity 0.2s ease',
         userSelect: 'none'
       });
-      root.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
-          <div style="font-weight:700;font-size:14px;letter-spacing:0.3px;">学习通助手</div>
-          <div style="display:flex;gap:6px;">
-            <button data-role="toggle" type="button" style="border:1px solid rgba(255,255,255,0.22);border-radius:7px;padding:4px 9px;font-size:11px;cursor:pointer;background:rgba(255,255,255,0.12);color:#fff;font-family:inherit;">暂停</button>
-            <button data-role="hide" type="button" style="border:1px solid rgba(255,255,255,0.22);border-radius:7px;padding:4px 9px;font-size:11px;cursor:pointer;background:rgba(255,255,255,0.12);color:#fff;font-family:inherit;">隐藏</button>
-          </div>
-        </div>
-        <div data-role="chapter" style="opacity:0.78;font-size:11px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
-        <div data-role="detail" style="opacity:0.96;line-height:1.4;font-family:'Avenir Next','PingFang SC',sans-serif;">初始化中…</div>
-        <div data-role="bar" style="margin-top:9px;height:4px;background:rgba(255,255,255,0.18);border-radius:2px;overflow:hidden;">
-          <div data-role="bar-fill" style="height:100%;width:0%;background:#7dd3b5;transition:width 0.25s ease;"></div>
-        </div>
-        <div data-role="meta" style="margin-top:6px;opacity:0.72;font-family:'Avenir Next','PingFang SC',sans-serif;"></div>
-      `;
+
+      root.querySelectorAll('button').forEach(btn => {
+        Object.assign(btn.style, {
+          border: '1px solid rgba(255,255,255,0.22)',
+          borderRadius: '7px',
+          padding: '4px 8px',
+          fontSize: '11px',
+          cursor: 'pointer',
+          background: 'rgba(255,255,255,0.12)',
+          color: '#fff',
+          fontFamily: 'inherit',
+          lineHeight: '1'
+        });
+      });
+
+      this.bindHudEvents(root);
+      document.documentElement.appendChild(root);
+      this.hud = root;
+      this.applyHudPosition();
+      this.updateHud();
+    }
+
+    bindHudEvents(root) {
+      const stop = e => e.stopPropagation();
 
       root.querySelector('[data-role="toggle"]').addEventListener('click', async e => {
-        e.stopPropagation();
+        stop(e);
         if (!this.ensureAlive()) return;
         try {
           await chrome.storage.sync.set({ isRunning: !this.settings.isRunning });
@@ -289,8 +394,9 @@
           this.markDead(error && error.message);
         }
       });
+
       root.querySelector('[data-role="hide"]').addEventListener('click', async e => {
-        e.stopPropagation();
+        stop(e);
         if (!this.ensureAlive()) return;
         try {
           await chrome.storage.sync.set({ showHud: false });
@@ -299,9 +405,114 @@
         }
       });
 
-      document.documentElement.appendChild(root);
-      this.hud = root;
-      this.updateHud();
+      root.querySelector('[data-role="compact"]').addEventListener('click', async e => {
+        stop(e);
+        this.hudLayout.compact = true;
+        await this.saveHudLayout();
+        this.updateHud();
+      });
+
+      root.querySelector('[data-role="speed-down"]').addEventListener('click', e => {
+        stop(e);
+        this.adjustSpeed(-0.25);
+      });
+      root.querySelector('[data-role="speed-up"]').addEventListener('click', e => {
+        stop(e);
+        this.adjustSpeed(0.25);
+      });
+
+      const dragHandle = root.querySelector('[data-role="drag"]');
+      dragHandle.addEventListener('mousedown', e => {
+        if (e.target.closest('button')) return;
+        e.preventDefault();
+        const rect = root.getBoundingClientRect();
+        this.dragState = {
+          offsetX: e.clientX - rect.left,
+          offsetY: e.clientY - rect.top
+        };
+        dragHandle.style.cursor = 'grabbing';
+      });
+
+      root.querySelector('[data-role="compact-view"]').addEventListener('mousedown', e => {
+        e.preventDefault();
+        const rect = root.getBoundingClientRect();
+        this.dragState = {
+          offsetX: e.clientX - rect.left,
+          offsetY: e.clientY - rect.top,
+          fromCompact: true,
+          moved: false,
+          startX: e.clientX,
+          startY: e.clientY
+        };
+      });
+
+      window.addEventListener('mousemove', e => this.onHudDragMove(e));
+      window.addEventListener('mouseup', () => this.onHudDragEnd());
+    }
+
+    onHudDragMove(e) {
+      if (!this.dragState || !this.hud) return;
+      const left = Math.min(
+        window.innerWidth - 40,
+        Math.max(8, e.clientX - this.dragState.offsetX)
+      );
+      const top = Math.min(
+        window.innerHeight - 40,
+        Math.max(8, e.clientY - this.dragState.offsetY)
+      );
+      if (
+        this.dragState.fromCompact &&
+        (Math.abs(e.clientX - this.dragState.startX) > 4 ||
+          Math.abs(e.clientY - this.dragState.startY) > 4)
+      ) {
+        this.dragState.moved = true;
+      }
+      this.hudLayout.left = left;
+      this.hudLayout.top = top;
+      this.applyHudPosition();
+    }
+
+    async onHudDragEnd() {
+      if (!this.dragState || !this.hud) return;
+      const wasCompactClick =
+        this.dragState.fromCompact && !this.dragState.moved && this.hudLayout.compact;
+      this.dragState = null;
+      const handle = this.hud.querySelector('[data-role="drag"]');
+      if (handle) handle.style.cursor = 'grab';
+      await this.saveHudLayout();
+      if (wasCompactClick) {
+        this.hudLayout.compact = false;
+        await this.saveHudLayout();
+        this.updateHud();
+      }
+    }
+
+    applyHudPosition() {
+      if (!this.hud) return;
+      if (Number.isFinite(this.hudLayout.left) && Number.isFinite(this.hudLayout.top)) {
+        this.hud.style.left = `${this.hudLayout.left}px`;
+        this.hud.style.top = `${this.hudLayout.top}px`;
+        this.hud.style.right = 'auto';
+        this.hud.style.bottom = 'auto';
+      } else {
+        this.hud.style.left = 'auto';
+        this.hud.style.top = 'auto';
+        this.hud.style.right = '16px';
+        this.hud.style.bottom = '16px';
+      }
+    }
+
+    async adjustSpeed(delta) {
+      if (!this.ensureAlive()) return;
+      const next = Math.min(
+        4,
+        Math.max(0.5, Math.round((this.settings.playbackSpeed + delta) * 4) / 4)
+      );
+      try {
+        await chrome.storage.sync.set({ playbackSpeed: next });
+      } catch (error) {
+        this.markDead(error && error.message);
+      }
     }
 
     updateHud() {
@@ -314,23 +525,45 @@
       }
       if (!this.hud) return;
 
+      const full = this.hud.querySelector('[data-role="full-view"]');
+      const compact = this.hud.querySelector('[data-role="compact-view"]');
       const detail = this.hud.querySelector('[data-role="detail"]');
       const meta = this.hud.querySelector('[data-role="meta"]');
       const chapter = this.hud.querySelector('[data-role="chapter"]');
       const toggle = this.hud.querySelector('[data-role="toggle"]');
       const fill = this.hud.querySelector('[data-role="bar-fill"]');
+      const stats = this.hud.querySelector('[data-role="stats"]');
+      const compactMeta = this.hud.querySelector('[data-role="compact-meta"]');
 
       this.refreshChapterTitle();
+      const pct = formatProgress(this.status.progress);
+      const isCompact = !!this.hudLayout.compact;
+
+      full.style.display = isCompact ? 'none' : 'block';
+      compact.style.display = isCompact ? 'flex' : 'none';
+      this.hud.style.minWidth = isCompact ? '0' : '228px';
+      this.hud.style.padding = isCompact ? '10px 12px' : '12px 14px';
+
+      if (isCompact) {
+        const bits = [
+          this.settings.isRunning ? '运行中' : '已停止',
+          `${this.settings.playbackSpeed}x`
+        ];
+        if (this.status.hasVideo) bits.push(`${pct}%`);
+        compactMeta.textContent = bits.join(' · ');
+        this.hud.style.opacity = this.settings.isRunning ? '1' : '0.75';
+        return;
+      }
+
       chapter.textContent = this.status.chapter || '未识别当前章节';
       toggle.textContent = this.settings.isRunning ? '暂停' : '开始';
-
-      const pct = formatProgress(this.status.progress);
       fill.style.width = `${pct}%`;
+      stats.textContent = `本会话 · 切章 ${this.stats.nextCount} · 答题 ${this.stats.answerCount}`;
 
       if (!this.settings.isRunning) {
         detail.textContent = '已停止';
         meta.textContent = '点击“开始”或在扩展弹窗中开启';
-        this.hud.style.opacity = '0.7';
+        this.hud.style.opacity = '0.75';
         return;
       }
 
@@ -344,14 +577,23 @@
 
     updateHudProgressOnly() {
       if (!this.hud || !this.settings.showHud) return;
+      const pct = formatProgress(this.status.progress);
       const fill = this.hud.querySelector('[data-role="bar-fill"]');
       const meta = this.hud.querySelector('[data-role="meta"]');
-      const pct = formatProgress(this.status.progress);
+      const compactMeta = this.hud.querySelector('[data-role="compact-meta"]');
       if (fill) fill.style.width = `${pct}%`;
-      if (meta && this.settings.isRunning) {
+      if (meta && this.settings.isRunning && !this.hudLayout.compact) {
         const parts = [`${this.settings.playbackSpeed}x`, `${pct}%`];
         if (this.settings.mute) parts.push('静音');
         meta.textContent = parts.join(' · ');
+      }
+      if (compactMeta && this.hudLayout.compact) {
+        const bits = [
+          this.settings.isRunning ? '运行中' : '已停止',
+          `${this.settings.playbackSpeed}x`,
+          `${pct}%`
+        ];
+        compactMeta.textContent = bits.join(' · ');
       }
     }
 
@@ -682,6 +924,7 @@
       if (this.answerQuestion(dialog)) {
         this.lastAnswerAt = Date.now();
         this.setStatus('answer', '已自动作答弹窗题');
+        this.bumpStat('answerCount');
       }
     }
 
@@ -794,7 +1037,8 @@
 
       const run = () => {
         if (IS_TOP) {
-          this.goToNextChapter(reason);
+          const moved = this.goToNextChapter(reason);
+          if (moved) this.bumpStat('nextCount');
         } else {
           try {
             window.parent.postMessage({ type: 'XXT_GO_NEXT_CHAPTER', reason }, '*');
@@ -811,10 +1055,10 @@
     }
 
     goToNextChapter(reason = '') {
-      if (this.dismissJobFinishTip()) return;
+      if (this.dismissJobFinishTip()) return true;
 
       if (reason !== 'chapter-test') {
-        if (this.clickNextCatalogItem()) return;
+        if (this.clickNextCatalogItem()) return true;
       }
 
       const nextSelectors = [
@@ -834,14 +1078,15 @@
           this.log('点击下一节按钮:', selector);
           safeClick(btn);
           this.setStatus('next', '已切换到下一节');
-          return;
+          return true;
         }
       }
 
-      if (reason === 'chapter-test' && this.clickNextCatalogItem()) return;
+      if (reason === 'chapter-test' && this.clickNextCatalogItem()) return true;
 
       this.log('未找到下一章节入口，可能已学完');
       this.setStatus('done', '未找到下一节，可能已全部完成');
+      return false;
     }
 
     clickNextCatalogItem() {

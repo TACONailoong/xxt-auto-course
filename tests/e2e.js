@@ -93,6 +93,23 @@ function sleep(ms) {
       hudMeta && hudMeta.chapter
     );
 
+    const hasCompact = await page
+      .$eval('#xxt-assistant-hud [data-role="compact"]', el => !!el)
+      .catch(() => false);
+    check('浮层支持收起', hasCompact);
+
+    const hasSpeedBtns = await page
+      .evaluate(() => {
+        const hud = document.querySelector('#xxt-assistant-hud');
+        return !!(
+          hud &&
+          hud.querySelector('[data-role="speed-up"]') &&
+          hud.querySelector('[data-role="speed-down"]')
+        );
+      })
+      .catch(() => false);
+    check('浮层支持快捷调速', hasSpeedBtns);
+
     let videoState = null;
     for (const f of page.frames()) {
       videoState = await f
@@ -168,6 +185,16 @@ function sleep(ms) {
 
       const chapterText = await popup.$eval('#liveChapter', el => el.textContent);
       check('弹窗显示章节名', chapterText.includes('第一课') || chapterText.includes('第二课'), chapterText);
+
+      const statsText = await popup.$eval('#statsRow', el => el.textContent);
+      check(
+        '弹窗显示会话统计',
+        statsText.includes('切章') && statsText.includes('答题'),
+        statsText
+      );
+
+      const online = await popup.$eval('#nowPanel', el => el.classList.contains('is-online'));
+      check('弹窗处于已连接态', online);
 
       const aria = await popup.$eval('#toggleAuto', el => el.getAttribute('aria-checked'));
       check('开关具备无障碍属性', aria === 'true' || aria === 'false', `aria-checked=${aria}`);

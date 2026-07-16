@@ -172,6 +172,28 @@ body::before {
   min-height: 34px;
 }
 
+.now.is-offline {
+  background:
+    linear-gradient(180deg, rgba(243, 247, 245, 0.95), rgba(255, 255, 255, 0.86));
+}
+
+.now.is-offline .now-kicker {
+  color: var(--warn);
+}
+
+.now.is-online .now-kicker {
+  color: var(--accent-deep);
+}
+
+.stats-row {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(20, 35, 31, 0.08);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .progress {
   margin-top: 10px;
   height: 5px;
