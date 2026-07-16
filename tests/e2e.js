@@ -157,6 +157,12 @@ function sleep(ms) {
       const statusText = await popup.$eval('#statusText', el => el.textContent);
       check('弹窗显示运行中', statusText === '插件运行中', statusText);
 
+      const brand = await popup.$eval('.brand-text h1', el => el.textContent);
+      check('弹窗品牌标题可见', brand.includes('学习通助手'), brand);
+
+      const moreExists = await popup.$eval('details.more', el => !!el).catch(() => false);
+      check('次要选项已折叠收纳', moreExists);
+
       const logText = await popup.$eval('#logList', el => el.textContent);
       check('弹窗显示活动日志', logText && !logText.includes('暂无活动记录'), logText.slice(0, 80));
 
