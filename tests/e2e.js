@@ -74,10 +74,24 @@ function sleep(ms) {
     const hudExists = await page.$eval('#xxt-assistant-hud', el => !!el).catch(() => false);
     check('页面状态浮层已显示', hudExists);
 
-    const hudHasToggle = await page
-      .$eval('#xxt-assistant-hud [data-role="toggle"]', el => !!el)
-      .catch(() => false);
-    check('浮层包含暂停按钮', hudHasToggle);
+    const hudMeta = await page
+      .evaluate(() => {
+        const hud = document.querySelector('#xxt-assistant-hud');
+        if (!hud) return null;
+        return {
+          hasToggle: !!hud.querySelector('[data-role="toggle"]'),
+          hasBar: !!hud.querySelector('[data-role="bar-fill"]'),
+          chapter: (hud.querySelector('[data-role="chapter"]') || {}).textContent || ''
+        };
+      })
+      .catch(() => null);
+    check('浮层包含暂停按钮', !!(hudMeta && hudMeta.hasToggle));
+    check('浮层包含进度条', !!(hudMeta && hudMeta.hasBar));
+    check(
+      '浮层显示当前章节',
+      !!(hudMeta && hudMeta.chapter.includes('第一课')),
+      hudMeta && hudMeta.chapter
+    );
 
     let videoState = null;
     for (const f of page.frames()) {
@@ -145,6 +159,12 @@ function sleep(ms) {
 
       const logText = await popup.$eval('#logList', el => el.textContent);
       check('弹窗显示活动日志', logText && !logText.includes('暂无活动记录'), logText.slice(0, 80));
+
+      const chapterText = await popup.$eval('#liveChapter', el => el.textContent);
+      check('弹窗显示章节名', chapterText.includes('第一课') || chapterText.includes('第二课'), chapterText);
+
+      const aria = await popup.$eval('#toggleAuto', el => el.getAttribute('aria-checked'));
+      check('开关具备无障碍属性', aria === 'true' || aria === 'false', `aria-checked=${aria}`);
 
       // 即时保存：改倍速无需点保存按钮
       await popup.click('.preset-btn[data-speed="2"]');

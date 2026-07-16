@@ -1,5 +1,4 @@
 // 学习通自动刷课插件 - Popup 脚本
-// 设置变更立即写入 storage.sync，内容脚本通过 onChanged 实时生效。
 
 const DEFAULT_SETTINGS =
   (typeof XXT_DEFAULT_SETTINGS !== 'undefined' && XXT_DEFAULT_SETTINGS) ||
@@ -17,6 +16,9 @@ const DEFAULT_SETTINGS =
 const STATUS_KEY =
   (typeof XXT_STATUS_KEY !== 'undefined' && XXT_STATUS_KEY) || 'xxtRuntimeStatus';
 const LOG_KEY = (typeof XXT_LOG_KEY !== 'undefined' && XXT_LOG_KEY) || 'xxtActivityLog';
+const formatProgress =
+  (typeof xxtFormatProgress === 'function' && xxtFormatProgress) ||
+  (p => Math.round((Number(p) || 0) * 100));
 
 let settings = { ...DEFAULT_SETTINGS };
 let saveTimer = null;
@@ -67,10 +69,19 @@ function bindEvents() {
 function bindToggle(elementId, key) {
   const el = document.getElementById(elementId);
   if (!el) return;
-  el.addEventListener('click', () => {
+
+  const toggle = () => {
     settings[key] = !settings[key];
     updateUI();
     scheduleSave();
+  };
+
+  el.addEventListener('click', toggle);
+  el.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      toggle();
+    }
   });
 }
 
@@ -99,18 +110,24 @@ async function saveSettings() {
 
 async function refreshLiveStatus() {
   const liveDetail = document.getElementById('liveDetail');
+  const liveChapter = document.getElementById('liveChapter');
+  const liveProgress = document.getElementById('liveProgress');
   try {
     const result = await chrome.storage.local.get(STATUS_KEY);
     const status = result[STATUS_KEY];
     if (!status || Date.now() - (status.updatedAt || 0) > 15000) {
       liveDetail.textContent = '尚未检测到活跃课程页（打开学习通播放页后显示）';
+      liveChapter.textContent = '—';
+      liveProgress.style.width = '0%';
       return;
     }
+    liveChapter.textContent = status.chapter || '未识别当前章节';
     const parts = [status.detail || '运行中'];
-    if (status.hasVideo && status.progress > 0) {
-      parts.push(`进度 ${Math.round(status.progress * 100)}%`);
+    if (status.hasVideo) {
+      parts.push(`进度 ${formatProgress(status.progress)}%`);
     }
     liveDetail.textContent = parts.join(' · ');
+    liveProgress.style.width = `${formatProgress(status.progress)}%`;
   } catch (error) {
     liveDetail.textContent = '状态读取失败';
   }
@@ -182,7 +199,9 @@ function updateUI() {
 
 function setToggle(id, active) {
   const el = document.getElementById(id);
-  if (el) el.classList.toggle('active', !!active);
+  if (!el) return;
+  el.classList.toggle('active', !!active);
+  el.setAttribute('aria-checked', active ? 'true' : 'false');
 }
 
 function showSaveHint() {

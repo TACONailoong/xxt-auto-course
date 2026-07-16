@@ -1,7 +1,6 @@
 // 学习通自动刷课插件 - 内容脚本
-// 通过 manifest 的 all_frames 注入到每一个 frame。
-// 顶层页面负责：状态浮层、目录切换、步骤页签、测验跳过、防挂机弹窗。
-// 内层 frame 负责：视频接管、答题、文档滚动。
+// 顶层：浮层、目录切章、页签、测验跳过、防挂机弹窗
+// iframe：视频接管、答题、文档滚动
 
 (() => {
   'use strict';
@@ -22,6 +21,16 @@
       showHud: true
     };
 
+  const DOM = (typeof XXT_DOM !== 'undefined' && XXT_DOM) || {};
+  const isVisible = DOM.isVisible || (() => false);
+  const safeClick = DOM.safeClick || (() => false);
+  const randomDelay = DOM.randomDelay || ((a, b) => a);
+  const formatProgress = DOM.formatProgress || (p => Math.round((p || 0) * 100));
+  const normalizeText = DOM.normalizeText || (t => String(t || '').replace(/\s+/g, ''));
+  const pickNextCatalogItem = DOM.pickNextCatalogItem;
+  const shouldLogStatusChange = DOM.shouldLogStatusChange || ((a, b) => a !== b);
+  const isExtensionAlive = DOM.isExtensionAlive || (() => true);
+
   const IS_TOP = window.top === window.self;
   const STATUS_KEY =
     (typeof XXT_STATUS_KEY !== 'undefined' && XXT_STATUS_KEY) || 'xxtRuntimeStatus';
@@ -34,16 +43,21 @@
       this.managedVideos = new WeakSet();
       this.observer = null;
       this.tickTimer = null;
+      this.scanTimer = null;
       this.lastAnswerAt = 0;
       this.lastNextAt = 0;
       this.lastDocScrollAt = 0;
       this.lastIdleDismissAt = 0;
+      this.lastPlayClickAt = 0;
+      this.lastPublishAt = 0;
       this.nextPending = false;
       this.stallLastTime = 0;
       this.stallLastWall = 0;
+      this.dead = false;
       this.status = {
         phase: 'idle',
         detail: '等待课程页面…',
+        chapter: '',
         hasVideo: false,
         progress: 0,
         updatedAt: Date.now()
@@ -59,7 +73,8 @@
       this.tickTimer = setInterval(() => this.tick(), 1500);
       if (IS_TOP) {
         this.ensureHud();
-        this.publishStatus();
+        this.refreshChapterTitle();
+        this.publishStatus(true);
         this.pushLog('插件已在本页启动');
       }
       this.log('插件已启动', { frame: IS_TOP ? 'top' : 'iframe', ...this.settings });
@@ -69,31 +84,54 @@
       console.log('[学习通助手]', ...args);
     }
 
-    randomDelay(minMs, maxMs) {
-      return minMs + Math.floor(Math.random() * (maxMs - minMs + 1));
+    markDead(reason) {
+      if (this.dead) return;
+      this.dead = true;
+      this.log('扩展上下文失效，停止工作:', reason || '');
+      if (this.tickTimer) clearInterval(this.tickTimer);
+      if (this.scanTimer) clearTimeout(this.scanTimer);
+      if (this.observer) this.observer.disconnect();
+      this.tickTimer = null;
+      this.scanTimer = null;
+      this.observer = null;
+    }
+
+    ensureAlive() {
+      if (this.dead) return false;
+      if (!isExtensionAlive()) {
+        this.markDead('runtime unavailable');
+        return false;
+      }
+      return true;
     }
 
     async loadSettings() {
+      if (!this.ensureAlive()) return;
       try {
         const stored = await chrome.storage.sync.get(DEFAULT_SETTINGS);
         this.settings = { ...DEFAULT_SETTINGS, ...stored };
       } catch (error) {
-        this.log('加载设置失败:', error);
+        this.markDead(error && error.message);
       }
     }
 
     watchSettingsChanges() {
-      chrome.storage.onChanged.addListener((changes, area) => {
-        if (area !== 'sync') return;
-        for (const key of Object.keys(DEFAULT_SETTINGS)) {
-          if (changes[key]) this.settings[key] = changes[key].newValue;
-        }
-        this.applySettings();
-        if (IS_TOP) {
-          this.ensureHud();
-          this.updateHud();
-        }
-      });
+      if (!this.ensureAlive()) return;
+      try {
+        chrome.storage.onChanged.addListener((changes, area) => {
+          if (!this.ensureAlive() || area !== 'sync') return;
+          for (const key of Object.keys(DEFAULT_SETTINGS)) {
+            if (changes[key]) this.settings[key] = changes[key].newValue;
+          }
+          this.applySettings();
+          if (IS_TOP) {
+            this.ensureHud();
+            this.updateHud();
+          }
+        });
+      } catch (error) {
+        this.markDead(error && error.message);
+      }
     }
 
     applySettings() {
@@ -120,13 +158,28 @@
       };
       if (IS_TOP) {
         this.updateHud();
-        this.publishStatus();
-        if (detail && detail !== prevDetail) this.pushLog(detail);
+        this.publishStatus(true);
+        if (shouldLogStatusChange(prevDetail, detail)) this.pushLog(detail);
       }
     }
 
-    async publishStatus() {
-      if (!IS_TOP) return;
+    // 高频进度更新：只改本地状态，按节流上报
+    setProgress(progress, extra = {}) {
+      this.status.progress = progress;
+      this.status.hasVideo = true;
+      Object.assign(this.status, extra);
+      this.status.updatedAt = Date.now();
+      if (IS_TOP) {
+        this.updateHudProgressOnly();
+        this.publishStatus(false);
+      }
+    }
+
+    async publishStatus(force = false) {
+      if (!IS_TOP || !this.ensureAlive()) return;
+      const now = Date.now();
+      if (!force && now - this.lastPublishAt < 2000) return;
+      this.lastPublishAt = now;
       try {
         await chrome.storage.local.set({
           [STATUS_KEY]: {
@@ -145,22 +198,36 @@
             detail: this.status.detail
           })
           .catch(() => {});
-      } catch (_) {
-        // 扩展上下文失效时忽略
+      } catch (error) {
+        this.markDead(error && error.message);
       }
     }
 
     async pushLog(message) {
-      if (!IS_TOP || !message) return;
+      if (!IS_TOP || !message || !this.ensureAlive()) return;
       try {
         const result = await chrome.storage.local.get(LOG_KEY);
         const list = Array.isArray(result[LOG_KEY]) ? result[LOG_KEY] : [];
         list.unshift({ t: Date.now(), message: String(message) });
         await chrome.storage.local.set({ [LOG_KEY]: list.slice(0, LOG_LIMIT) });
-      } catch (_) {}
+      } catch (error) {
+        this.markDead(error && error.message);
+      }
     }
 
-    // ---------- 页面状态浮层（仅顶层） ----------
+    refreshChapterTitle() {
+      if (!IS_TOP) return '';
+      const name = document.querySelector('.posCatalog_active .posCatalog_name');
+      const title = name
+        ? (name.getAttribute('title') || name.textContent || '').trim()
+        : '';
+      if (title && title !== this.status.chapter) {
+        this.status.chapter = title;
+      }
+      return this.status.chapter;
+    }
+
+    // ---------- HUD ----------
 
     ensureHud() {
       if (!IS_TOP || !document.documentElement) return;
@@ -172,7 +239,6 @@
         }
         return;
       }
-
       if (this.hud) return;
 
       const root = document.createElement('div');
@@ -185,12 +251,13 @@
         fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
         fontSize: '12px',
         color: '#fff',
-        background: 'rgba(26, 26, 46, 0.92)',
+        background: 'rgba(15, 23, 42, 0.92)',
         borderRadius: '12px',
         padding: '12px 14px',
         boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
         backdropFilter: 'blur(8px)',
-        minWidth: '200px',
+        minWidth: '220px',
+        maxWidth: '280px',
         pointerEvents: 'auto',
         transition: 'opacity 0.2s ease',
         userSelect: 'none'
@@ -203,21 +270,31 @@
             <button data-role="hide" type="button" style="border:none;border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer;background:#334155;color:#fff;">隐藏</button>
           </div>
         </div>
-        <div data-role="detail" style="opacity:0.9;line-height:1.4;">初始化中…</div>
+        <div data-role="chapter" style="opacity:0.75;font-size:11px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+        <div data-role="detail" style="opacity:0.95;line-height:1.4;">初始化中…</div>
+        <div data-role="bar" style="margin-top:8px;height:4px;background:rgba(255,255,255,0.15);border-radius:999px;overflow:hidden;">
+          <div data-role="bar-fill" style="height:100%;width:0%;background:#34d399;transition:width 0.25s ease;"></div>
+        </div>
         <div data-role="meta" style="margin-top:6px;opacity:0.7;"></div>
       `;
 
       root.querySelector('[data-role="toggle"]').addEventListener('click', async e => {
         e.stopPropagation();
+        if (!this.ensureAlive()) return;
         try {
           await chrome.storage.sync.set({ isRunning: !this.settings.isRunning });
-        } catch (_) {}
+        } catch (error) {
+          this.markDead(error && error.message);
+        }
       });
       root.querySelector('[data-role="hide"]').addEventListener('click', async e => {
         e.stopPropagation();
+        if (!this.ensureAlive()) return;
         try {
           await chrome.storage.sync.set({ showHud: false });
-        } catch (_) {}
+        } catch (error) {
+          this.markDead(error && error.message);
+        }
       });
 
       document.documentElement.appendChild(root);
@@ -237,33 +314,61 @@
 
       const detail = this.hud.querySelector('[data-role="detail"]');
       const meta = this.hud.querySelector('[data-role="meta"]');
+      const chapter = this.hud.querySelector('[data-role="chapter"]');
       const toggle = this.hud.querySelector('[data-role="toggle"]');
+      const fill = this.hud.querySelector('[data-role="bar-fill"]');
 
+      this.refreshChapterTitle();
+      chapter.textContent = this.status.chapter || '未识别当前章节';
       toggle.textContent = this.settings.isRunning ? '暂停' : '开始';
+
+      const pct = formatProgress(this.status.progress);
+      fill.style.width = `${pct}%`;
+
       if (!this.settings.isRunning) {
         detail.textContent = '已停止';
         meta.textContent = '点击“开始”或在扩展弹窗中开启';
         this.hud.style.opacity = '0.7';
         return;
       }
+
       this.hud.style.opacity = '1';
       detail.textContent = this.status.detail || '运行中';
       const parts = [`${this.settings.playbackSpeed}x`];
-      if (this.status.hasVideo && this.status.progress > 0) {
-        parts.push(`${Math.round(this.status.progress * 100)}%`);
-      }
+      if (this.status.hasVideo) parts.push(`${pct}%`);
       if (this.settings.mute) parts.push('静音');
       meta.textContent = parts.join(' · ');
     }
 
-    // ---------- 视频检测与接管 ----------
+    updateHudProgressOnly() {
+      if (!this.hud || !this.settings.showHud) return;
+      const fill = this.hud.querySelector('[data-role="bar-fill"]');
+      const meta = this.hud.querySelector('[data-role="meta"]');
+      const pct = formatProgress(this.status.progress);
+      if (fill) fill.style.width = `${pct}%`;
+      if (meta && this.settings.isRunning) {
+        const parts = [`${this.settings.playbackSpeed}x`, `${pct}%`];
+        if (this.settings.mute) parts.push('静音');
+        meta.textContent = parts.join(' · ');
+      }
+    }
+
+    // ---------- 视频 ----------
 
     startObserver() {
-      this.scanForVideos();
+      this.scheduleScan();
       const root = document.body || document.documentElement;
       if (!root) return;
-      this.observer = new MutationObserver(() => this.scanForVideos());
+      this.observer = new MutationObserver(() => this.scheduleScan());
       this.observer.observe(root, { childList: true, subtree: true });
+    }
+
+    scheduleScan() {
+      if (this.scanTimer) return;
+      this.scanTimer = setTimeout(() => {
+        this.scanTimer = null;
+        this.scanForVideos();
+      }, 300);
     }
 
     findVideo() {
@@ -306,8 +411,7 @@
 
       video.addEventListener('timeupdate', () => {
         if (!video.duration) return;
-        this.status.progress = video.currentTime / video.duration;
-        this.status.hasVideo = true;
+        this.setProgress(video.currentTime / video.duration);
       });
 
       video.addEventListener('ended', () => {
@@ -316,7 +420,7 @@
         if (this.settings.isRunning && this.settings.autoNext) {
           setTimeout(
             () => this.requestNextChapter('video-ended'),
-            this.randomDelay(1200, 2200)
+            randomDelay(1200, 2200)
           );
         }
       });
@@ -342,6 +446,7 @@
     }
 
     clickPlayOverlay() {
+      if (Date.now() - this.lastPlayClickAt < 3000) return false;
       const selectors = [
         '[title="播放视频"]',
         '.vjs-big-play-button',
@@ -351,8 +456,9 @@
       ];
       for (const selector of selectors) {
         const btn = document.querySelector(selector);
-        if (btn && this.isVisible(btn)) {
-          this.safeClick(btn);
+        if (btn && isVisible(btn)) {
+          this.lastPlayClickAt = Date.now();
+          safeClick(btn);
           this.log('已点击播放按钮:', selector);
           return true;
         }
@@ -363,18 +469,22 @@
     // ---------- 主循环 ----------
 
     tick() {
-      // 浮层始终可更新；停止时仍允许通过浮层重新开启
+      if (!this.ensureAlive()) return;
+
       if (IS_TOP) {
         this.ensureHud();
-        this.updateHud();
+        this.refreshChapterTitle();
       }
 
-      if (!this.settings.isRunning) return;
+      if (!this.settings.isRunning) {
+        if (IS_TOP) this.updateHud();
+        return;
+      }
 
       if (IS_TOP) {
         if (this.settings.dismissIdle) this.dismissIdleDialogs();
         this.handleTopFrameTasks();
-        if (Date.now() - this.status.updatedAt > 2000) this.publishStatus();
+        this.publishStatus(false);
       }
 
       this.scanForVideos();
@@ -411,10 +521,14 @@
           this.stallLastTime = t;
           this.stallLastWall = now;
         }
-        this.setStatus('playing', '正在播放', {
-          hasVideo: true,
-          progress: video.duration ? t / video.duration : this.status.progress
-        });
+
+        const progress = video.duration ? t / video.duration : this.status.progress;
+        // 仅在文案变化时打完整状态，避免每秒刷日志
+        if (this.status.detail !== '正在播放') {
+          this.setStatus('playing', '正在播放', { hasVideo: true, progress });
+        } else {
+          this.setProgress(progress);
+        }
       }
     }
 
@@ -449,11 +563,11 @@
 
       const tabs = document.querySelectorAll('.prev_white');
       for (const tab of tabs) {
-        if (!this.isVisible(tab)) continue;
-        const text = (tab.textContent || '').replace(/\s+/g, '');
+        if (!isVisible(tab)) continue;
+        const text = normalizeText(tab.textContent);
         if (text === '2视频' || text === '视频' || text.endsWith('视频')) {
           this.log('切换到视频页签:', text);
-          this.safeClick(tab);
+          safeClick(tab);
           this.setStatus('navigate', '已切换到视频步骤');
           return true;
         }
@@ -476,8 +590,6 @@
       return unfinished.length === 0;
     }
 
-    // ---------- 防挂机 / 提示弹窗 ----------
-
     dismissIdleDialogs() {
       if (Date.now() - this.lastIdleDismissAt < 2500) return false;
 
@@ -486,16 +598,15 @@
         '.maskDiv, .popDiv, .dialog-mask, .el-message-box, .el-dialog, .ant-modal, .layui-layer'
       );
 
-      const clickIfMatch = (root) => {
+      const clickIfMatch = root => {
         const buttons = root.querySelectorAll('a, button, .jb_btn, .btn, span, div');
         for (const btn of buttons) {
-          if (!this.isVisible(btn)) continue;
-          const text = (btn.textContent || '').replace(/\s+/g, '');
+          if (!isVisible(btn)) continue;
+          const text = normalizeText(btn.textContent);
           if (!text || text.length > 12) continue;
           if (keywords.some(k => text === k || text.includes(k))) {
-            // 避免误点目录/导航里的“下一节”
             if (btn.closest('#coursetree, .posCatalog_select')) continue;
-            this.safeClick(btn);
+            safeClick(btn);
             this.lastIdleDismissAt = Date.now();
             this.log('已关闭提示弹窗:', text);
             this.setStatus('dialog', `已关闭提示：${text}`);
@@ -506,16 +617,14 @@
       };
 
       for (const root of roots) {
-        if (!this.isVisible(root) && !root.classList.contains('maskDiv')) continue;
-        // maskDiv 有时 opacity/尺寸特殊，只要包含关键词按钮就点
+        if (!isVisible(root) && !root.classList.contains('maskDiv')) continue;
         if (clickIfMatch(root)) return true;
       }
 
-      // 兜底：全局找“继续学习”
       for (const btn of document.querySelectorAll('a, button, .jb_btn')) {
-        const text = (btn.textContent || '').replace(/\s+/g, '');
-        if ((text === '继续学习' || text === '我知道了') && this.isVisible(btn)) {
-          this.safeClick(btn);
+        const text = normalizeText(btn.textContent);
+        if ((text === '继续学习' || text === '我知道了') && isVisible(btn)) {
+          safeClick(btn);
           this.lastIdleDismissAt = Date.now();
           this.setStatus('dialog', `已关闭提示：${text}`);
           return true;
@@ -528,15 +637,13 @@
       const tipNext = document.querySelector(
         '.jb_btn.jb_btn_92.fr.fs14.nextChapter, .maskDiv .nextChapter, .nextChapter'
       );
-      if (tipNext && this.isVisible(tipNext)) {
+      if (tipNext && isVisible(tipNext)) {
         this.log('点击完成提示中的下一章按钮');
-        this.safeClick(tipNext);
+        safeClick(tipNext);
         return true;
       }
       return false;
     }
-
-    // ---------- 文档阅读 ----------
 
     handleDocumentReading() {
       const boxes = document.querySelectorAll('.fileBox, .imgLook, .doc-reader, #img');
@@ -545,7 +652,7 @@
       this.lastDocScrollAt = Date.now();
 
       for (const box of boxes) {
-        if (!this.isVisible(box)) continue;
+        if (!isVisible(box)) continue;
         const scrollable =
           box.querySelector('.scrollbar, .imgLook, .reader-container') || box;
         const canScroll = scrollable.scrollHeight > scrollable.clientHeight + 20;
@@ -565,8 +672,6 @@
         break;
       }
     }
-
-    // ---------- 自动答题 ----------
 
     checkAndAnswerQuestion() {
       if (Date.now() - this.lastAnswerAt < 3000) return;
@@ -590,7 +695,7 @@
       for (const selector of selectors) {
         for (const el of document.querySelectorAll(selector)) {
           if (
-            this.isVisible(el) &&
+            isVisible(el) &&
             el.querySelector(
               'input[type="radio"], input[type="checkbox"], .ans-videoquiz-opt'
             )
@@ -600,34 +705,10 @@
         }
       }
       const anyInput = document.querySelector('input[type="radio"], input[type="checkbox"]');
-      if (anyInput && this.isVisible(anyInput)) {
+      if (anyInput && isVisible(anyInput)) {
         return anyInput.closest('form, .tkTopic, .ans-videoquiz, div') || document.body;
       }
       return null;
-    }
-
-    isVisible(el) {
-      if (!el) return false;
-      const style = window.getComputedStyle(el);
-      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
-        return false;
-      }
-      const rect = el.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0;
-    }
-
-    safeClick(el) {
-      if (!el) return;
-      try {
-        el.dispatchEvent(
-          new MouseEvent('click', { bubbles: true, cancelable: true, view: window })
-        );
-        if (typeof el.click === 'function') el.click();
-      } catch (_) {
-        try {
-          el.click();
-        } catch (__) {}
-      }
     }
 
     answerQuestion(container) {
@@ -636,7 +717,7 @@
           ...container.querySelectorAll(
             'input[type="radio"], input[type="checkbox"], .ans-videoquiz-opt, .answerOption, li.option'
           )
-        ].filter(el => this.isVisible(el));
+        ].filter(el => isVisible(el));
 
         const radios = optionNodes.filter(
           el => el.matches && el.matches('input[type="radio"]')
@@ -654,7 +735,7 @@
 
         if (radios.length > 0) {
           if (!radios.some(r => r.checked)) {
-            this.safeClick(radios[Math.floor(Math.random() * radios.length)]);
+            safeClick(radios[Math.floor(Math.random() * radios.length)]);
             this.log('自动答题：随机单选');
           }
           selected = true;
@@ -664,21 +745,18 @@
             [...checkboxes]
               .sort(() => Math.random() - 0.5)
               .slice(0, count)
-              .forEach(box => this.safeClick(box));
+              .forEach(box => safeClick(box));
             this.log('自动答题：随机多选');
           }
           selected = true;
         } else if (customOpts.length > 0) {
-          this.safeClick(customOpts[Math.floor(Math.random() * customOpts.length)]);
+          safeClick(customOpts[Math.floor(Math.random() * customOpts.length)]);
           this.log('自动答题：点击自定义选项');
           selected = true;
         }
 
         if (!selected) return false;
-        setTimeout(
-          () => this.clickSubmitButton(container),
-          this.randomDelay(500, 900)
-        );
+        setTimeout(() => this.clickSubmitButton(container), randomDelay(500, 900));
         return true;
       } catch (error) {
         this.log('自动答题失败:', error);
@@ -697,15 +775,13 @@
 
       for (const btn of candidates) {
         const text = (btn.textContent || btn.value || '').trim();
-        if (keywords.some(k => text.includes(k)) && this.isVisible(btn)) {
-          this.safeClick(btn);
+        if (keywords.some(k => text.includes(k)) && isVisible(btn)) {
+          safeClick(btn);
           this.log('自动答题：已点击提交 -', text);
           return;
         }
       }
     }
-
-    // ---------- 章节切换 ----------
 
     requestNextChapter(reason) {
       if (!this.settings.autoNext) return;
@@ -729,14 +805,12 @@
         }, 4000);
       };
 
-      // 轻微随机延迟，避免节奏过于机械
-      setTimeout(run, this.randomDelay(200, 800));
+      setTimeout(run, randomDelay(200, 800));
     }
 
     goToNextChapter(reason = '') {
       if (this.dismissJobFinishTip()) return;
 
-      // 视频结束/任务完成：优先走目录树（更稳定）；测验页优先点官方下一节
       if (reason !== 'chapter-test') {
         if (this.clickNextCatalogItem()) return;
       }
@@ -754,9 +828,9 @@
       ];
       for (const selector of nextSelectors) {
         const btn = document.querySelector(selector);
-        if (btn && this.isVisible(btn)) {
+        if (btn && isVisible(btn)) {
           this.log('点击下一节按钮:', selector);
-          this.safeClick(btn);
+          safeClick(btn);
           this.setStatus('next', '已切换到下一节');
           return;
         }
@@ -772,27 +846,33 @@
       const tree = document.querySelector('#coursetree');
       if (!tree) return false;
 
-      const items = [...tree.querySelectorAll('.posCatalog_select:not(.firstLayer)')];
-      if (!items.length) return false;
+      const nodes = [...tree.querySelectorAll('.posCatalog_select:not(.firstLayer)')];
+      if (!nodes.length) return false;
 
-      let activeIndex = items.findIndex(el => el.classList.contains('posCatalog_active'));
+      const items = nodes.map(el => ({
+        el,
+        tipText: (el.querySelector('.prevHoverTips') &&
+          el.querySelector('.prevHoverTips').textContent) ||
+          '',
+        nameEl: el.querySelector('.posCatalog_name')
+      }));
+
+      let activeIndex = nodes.findIndex(el => el.classList.contains('posCatalog_active'));
       if (activeIndex < 0) activeIndex = -1;
 
-      for (let i = activeIndex + 1; i < items.length; i++) {
-        const item = items[i];
-        const tip = item.querySelector('.prevHoverTips');
-        const tipText = (tip && tip.textContent) || '';
-        if (tipText.includes('已完成')) continue;
+      const picked = pickNextCatalogItem
+        ? pickNextCatalogItem(items, activeIndex)
+        : null;
 
-        const name = item.querySelector('.posCatalog_name');
-        if (name) {
-          this.log('目录切换到:', name.getAttribute('title') || name.textContent);
-          this.safeClick(name);
-          this.setStatus('next', '已从目录进入下一节');
-          return true;
-        }
-      }
-      return false;
+      if (!picked || !picked.item || !picked.item.nameEl) return false;
+
+      const name = picked.item.nameEl;
+      this.log('目录切换到:', name.getAttribute('title') || name.textContent);
+      safeClick(name);
+      this.setStatus('next', '已从目录进入下一节', {
+        chapter: (name.getAttribute('title') || name.textContent || '').trim()
+      });
+      return true;
     }
   }
 
@@ -803,27 +883,32 @@
       event.data &&
       event.data.type === 'XXT_GO_NEXT_CHAPTER' &&
       IS_TOP &&
-      player.settings.isRunning
+      player.settings.isRunning &&
+      !player.dead
     ) {
       player.requestNextChapter(event.data.reason || 'iframe');
     }
   });
 
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (!message) return false;
-    if (message.type === 'GET_STATUS') {
-      sendResponse({
-        ...player.settings,
-        ...player.status,
-        hasVideo: !!player.findVideo(),
-        isTop: IS_TOP
-      });
+  try {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (!message || player.dead) return false;
+      if (message.type === 'GET_STATUS') {
+        sendResponse({
+          ...player.settings,
+          ...player.status,
+          hasVideo: !!player.findVideo(),
+          isTop: IS_TOP
+        });
+        return false;
+      }
+      if (message.type === 'PING') {
+        sendResponse({ ok: true, isTop: IS_TOP });
+        return false;
+      }
       return false;
-    }
-    if (message.type === 'PING') {
-      sendResponse({ ok: true, isTop: IS_TOP });
-      return false;
-    }
-    return false;
-  });
+    });
+  } catch (_) {
+    player.markDead('onMessage unavailable');
+  }
 })();

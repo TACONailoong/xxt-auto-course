@@ -4,276 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>学习通自动刷课助手</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-      width: 340px;
-      padding: 16px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: #333;
-    }
-
-    .container {
-      background: white;
-      border-radius: 16px;
-      padding: 20px;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-    }
-
-    .header { text-align: center; margin-bottom: 18px; }
-
-    .header h1 {
-      font-size: 17px;
-      font-weight: 600;
-      color: #1a1a2e;
-      margin-bottom: 4px;
-    }
-
-    .header p { font-size: 12px; color: #666; }
-
-    .live-status {
-      margin-top: 12px;
-      padding: 10px 12px;
-      background: #f8fafc;
-      border-radius: 10px;
-      text-align: left;
-    }
-
-    .live-status .label {
-      font-size: 11px;
-      color: #94a3b8;
-      margin-bottom: 4px;
-    }
-
-    .live-status .value {
-      font-size: 13px;
-      font-weight: 500;
-      color: #1a1a2e;
-      line-height: 1.4;
-    }
-
-    .status-indicator {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      margin-top: 10px;
-    }
-
-    .status-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: #ccc;
-      transition: all 0.3s ease;
-    }
-
-    .status-dot.active {
-      background: #10b981;
-      box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
-    }
-
-    .status-text { font-size: 13px; font-weight: 500; }
-    .status-text.active { color: #10b981; }
-
-    .control-group { margin-bottom: 14px; }
-
-    .control-label {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-    }
-
-    .control-label .text { flex: 1; }
-    .control-label .title {
-      font-size: 14px;
-      font-weight: 500;
-      color: #1a1a2e;
-      display: block;
-    }
-    .control-label .desc {
-      font-size: 11px;
-      color: #94a3b8;
-      margin-top: 2px;
-      display: block;
-    }
-
-    .toggle-switch {
-      position: relative;
-      flex-shrink: 0;
-      width: 48px;
-      height: 26px;
-      background: #e5e7eb;
-      border-radius: 13px;
-      cursor: pointer;
-      transition: all 0.3s ease;
-    }
-
-    .toggle-switch.active { background: #10b981; }
-
-    .toggle-switch::after {
-      content: '';
-      position: absolute;
-      top: 3px;
-      left: 3px;
-      width: 20px;
-      height: 20px;
-      background: white;
-      border-radius: 50%;
-      transition: all 0.3s ease;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-    }
-
-    .toggle-switch.active::after { transform: translateX(22px); }
-
-    .speed-control { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
-
-    .speed-value {
-      font-size: 22px;
-      font-weight: 600;
-      color: #667eea;
-      text-align: center;
-    }
-
-    .speed-slider {
-      width: 100%;
-      height: 6px;
-      background: #e5e7eb;
-      border-radius: 3px;
-      outline: none;
-      -webkit-appearance: none;
-      cursor: pointer;
-    }
-
-    .speed-slider::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 20px;
-      height: 20px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      border-radius: 50%;
-      cursor: pointer;
-      box-shadow: 0 2px 6px rgba(102, 126, 234, 0.4);
-    }
-
-    .speed-presets { display: flex; gap: 8px; justify-content: center; }
-
-    .preset-btn {
-      padding: 6px 12px;
-      background: #f3f4f6;
-      border: none;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 500;
-      color: #666;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-
-    .preset-btn:hover { background: #e5e7eb; }
-
-    .preset-btn.active {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-    }
-
-    .divider { height: 1px; background: #e5e7eb; margin: 16px 0; }
-
-    .tips {
-      background: #f8fafc;
-      border-radius: 10px;
-      padding: 12px;
-      margin-bottom: 12px;
-    }
-
-    .tips h3 {
-      font-size: 12px;
-      font-weight: 600;
-      color: #1a1a2e;
-      margin-bottom: 6px;
-    }
-
-    .tips ul {
-      list-style: none;
-      font-size: 11px;
-      color: #666;
-      line-height: 1.7;
-    }
-
-    .tips li::before {
-      content: '•';
-      color: #667eea;
-      margin-right: 6px;
-    }
-
-    .footer {
-      text-align: center;
-      font-size: 11px;
-      color: #999;
-    }
-
-    .save-hint {
-      text-align: center;
-      font-size: 11px;
-      color: #10b981;
-      min-height: 16px;
-      margin-bottom: 8px;
-      opacity: 0;
-      transition: opacity 0.2s ease;
-    }
-
-    .save-hint.show { opacity: 1; }
-
-    .log-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 8px;
-    }
-
-    .log-header h3 {
-      font-size: 12px;
-      font-weight: 600;
-      color: #1a1a2e;
-    }
-
-    .log-clear {
-      border: none;
-      background: #f1f5f9;
-      color: #64748b;
-      border-radius: 6px;
-      padding: 3px 8px;
-      font-size: 11px;
-      cursor: pointer;
-    }
-
-    .log-list {
-      list-style: none;
-      max-height: 120px;
-      overflow-y: auto;
-      background: #f8fafc;
-      border-radius: 10px;
-      padding: 8px 10px;
-      margin-bottom: 12px;
-    }
-
-    .log-list li {
-      display: flex;
-      gap: 8px;
-      font-size: 11px;
-      line-height: 1.5;
-      color: #475569;
-      padding: 3px 0;
-      border-bottom: 1px solid #eef2f7;
-    }
-
-    .log-list li:last-child { border-bottom: none; }
-    .log-list .time { color: #94a3b8; flex-shrink: 0; font-variant-numeric: tabular-nums; }
-    .log-list .msg { word-break: break-all; }
-    .log-list .empty { color: #94a3b8; border: none; }
-  </style>
+  <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <div class="container">
@@ -281,12 +12,14 @@
       <h1>学习通自动刷课助手</h1>
       <p>自动播放 · 倍速 · 答题 · 切章</p>
       <div class="status-indicator">
-        <div class="status-dot" id="statusDot"></div>
+        <div class="status-dot" id="statusDot" aria-hidden="true"></div>
         <span class="status-text" id="statusText">插件已停止</span>
       </div>
       <div class="live-status">
         <div class="label">页面状态</div>
+        <div class="chapter" id="liveChapter">—</div>
         <div class="value" id="liveDetail">尚未检测到课程页，请打开学习通课程后查看</div>
+        <div class="progress" aria-hidden="true"><span id="liveProgress"></span></div>
       </div>
     </div>
 
@@ -296,7 +29,7 @@
           <span class="title">开启自动刷课</span>
           <span class="desc">播放、续播、切章总开关</span>
         </div>
-        <div class="toggle-switch" id="toggleAuto"></div>
+        <div class="toggle-switch" id="toggleAuto" role="switch" tabindex="0" aria-checked="false" aria-label="开启自动刷课"></div>
       </div>
     </div>
 
@@ -306,7 +39,7 @@
           <span class="title">自动答题</span>
           <span class="desc">视频弹窗题随机作答</span>
         </div>
-        <div class="toggle-switch" id="toggleAnswer"></div>
+        <div class="toggle-switch" id="toggleAnswer" role="switch" tabindex="0" aria-checked="false" aria-label="自动答题"></div>
       </div>
     </div>
 
@@ -316,7 +49,7 @@
           <span class="title">静音播放</span>
           <span class="desc">提高自动播放成功率</span>
         </div>
-        <div class="toggle-switch" id="toggleMute"></div>
+        <div class="toggle-switch" id="toggleMute" role="switch" tabindex="0" aria-checked="false" aria-label="静音播放"></div>
       </div>
     </div>
 
@@ -326,7 +59,7 @@
           <span class="title">跳过章节测验</span>
           <span class="desc">遇到测验页自动进下一节</span>
         </div>
-        <div class="toggle-switch" id="toggleSkipQuiz"></div>
+        <div class="toggle-switch" id="toggleSkipQuiz" role="switch" tabindex="0" aria-checked="false" aria-label="跳过章节测验"></div>
       </div>
     </div>
 
@@ -336,7 +69,7 @@
           <span class="title">自动下一节</span>
           <span class="desc">视频/任务完成后继续</span>
         </div>
-        <div class="toggle-switch" id="toggleAutoNext"></div>
+        <div class="toggle-switch" id="toggleAutoNext" role="switch" tabindex="0" aria-checked="false" aria-label="自动下一节"></div>
       </div>
     </div>
 
@@ -346,7 +79,7 @@
           <span class="title">关闭防挂机提示</span>
           <span class="desc">自动点“继续学习/我知道了”</span>
         </div>
-        <div class="toggle-switch" id="toggleDismissIdle"></div>
+        <div class="toggle-switch" id="toggleDismissIdle" role="switch" tabindex="0" aria-checked="false" aria-label="关闭防挂机提示"></div>
       </div>
     </div>
 
@@ -356,7 +89,7 @@
           <span class="title">显示页面浮层</span>
           <span class="desc">课程页右下角状态面板</span>
         </div>
-        <div class="toggle-switch" id="toggleShowHud"></div>
+        <div class="toggle-switch" id="toggleShowHud" role="switch" tabindex="0" aria-checked="false" aria-label="显示页面浮层"></div>
       </div>
     </div>
 
@@ -370,12 +103,12 @@
       </div>
       <div class="speed-control">
         <div class="speed-value" id="speedValue">1.5x</div>
-        <input type="range" class="speed-slider" id="speedSlider" min="0.5" max="4" step="0.25" value="1.5">
+        <input type="range" class="speed-slider" id="speedSlider" min="0.5" max="4" step="0.25" value="1.5" aria-label="播放倍速">
         <div class="speed-presets">
-          <button class="preset-btn" data-speed="1">1x</button>
-          <button class="preset-btn" data-speed="1.5">1.5x</button>
-          <button class="preset-btn" data-speed="2">2x</button>
-          <button class="preset-btn" data-speed="3">3x</button>
+          <button class="preset-btn" type="button" data-speed="1">1x</button>
+          <button class="preset-btn" type="button" data-speed="1.5">1.5x</button>
+          <button class="preset-btn" type="button" data-speed="2">2x</button>
+          <button class="preset-btn" type="button" data-speed="3">3x</button>
         </div>
       </div>
     </div>
@@ -401,10 +134,11 @@
     </div>
 
     <div class="save-hint" id="saveHint">已自动保存</div>
-    <div class="footer">版本 1.3.0 · 仅供学习交流使用</div>
+    <div class="footer">版本 1.4.0 · 仅供学习交流使用</div>
   </div>
 
   <script src="shared/defaults.js"></script>
+  <script src="shared/dom.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
