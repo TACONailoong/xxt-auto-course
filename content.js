@@ -1322,6 +1322,8 @@
 
       for (const root of roots) {
         if (!isVisible(root) && !root.classList.contains('maskDiv')) continue;
+        // 人脸/安全验证弹窗不自动点掉
+        if (isManualVerificationText(root.textContent || '')) continue;
         if (clickIfMatch(root)) return true;
       }
 
