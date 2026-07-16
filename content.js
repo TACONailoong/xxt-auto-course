@@ -290,11 +290,26 @@
     }
 
     async bumpStat(key) {
-      if (!IS_TOP) return;
-      this.stats[key] = (this.stats[key] || 0) + 1;
-      await this.persistStats();
-      this.publishStatus(true);
-      this.updateHud();
+      if (!this.ensureAlive()) return;
+      try {
+        const result = await chrome.storage.local.get(STATS_KEY);
+        const stats = result[STATS_KEY] || {
+          nextCount: 0,
+          answerCount: 0,
+          startedAt: Date.now()
+        };
+        stats[key] = (Number(stats[key]) || 0) + 1;
+        this.stats = stats;
+        await chrome.storage.local.set({ [STATS_KEY]: stats });
+        if (IS_TOP) {
+          this.publishStatus(true);
+          this.updateHud();
+        } else {
+          window.parent.postMessage({ type: 'XXT_STATS_UPDATED' }, '*');
+        }
+      } catch (error) {
+        this.markDead(error && error.message);
+      }
     }
 
     ensureHud() {
@@ -446,8 +461,11 @@
         };
       });
 
-      window.addEventListener('mousemove', e => this.onHudDragMove(e));
-      window.addEventListener('mouseup', () => this.onHudDragEnd());
+      if (!this.hudDragBound) {
+        this.hudDragBound = true;
+        window.addEventListener('mousemove', e => this.onHudDragMove(e));
+        window.addEventListener('mouseup', () => this.onHudDragEnd());
+      }
     }
 
     onHudDragMove(e) {
@@ -1125,15 +1143,14 @@
 
   const player = new XueXiTongAutoPlayer();
 
-  window.addEventListener('message', event => {
-    if (
-      event.data &&
-      event.data.type === 'XXT_GO_NEXT_CHAPTER' &&
-      IS_TOP &&
-      player.settings.isRunning &&
-      !player.dead
-    ) {
+  window.addEventListener('message', async event => {
+    if (!event.data || !IS_TOP || player.dead) return;
+    if (event.data.type === 'XXT_GO_NEXT_CHAPTER' && player.settings.isRunning) {
       player.requestNextChapter(event.data.reason || 'iframe');
+    } else if (event.data.type === 'XXT_STATS_UPDATED') {
+      await player.loadStats();
+      player.publishStatus(true);
+      player.updateHud();
     }
   });
 

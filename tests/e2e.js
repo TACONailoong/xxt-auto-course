@@ -189,7 +189,7 @@ function sleep(ms) {
       const statsText = await popup.$eval('#statsRow', el => el.textContent);
       check(
         '弹窗显示会话统计',
-        statsText.includes('切章') && statsText.includes('答题'),
+        /切章\s*[1-9]/.test(statsText) && /答题\s*[1-9]/.test(statsText),
         statsText
       );
 
