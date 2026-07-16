@@ -4,6 +4,9 @@ import { Inventory } from '../systems/Inventory.js';
 import { MissionSystem } from '../systems/Mission.js';
 import { PlanetEntry } from '../systems/PlanetEntry.js';
 import { Effects, StormSystem, AnalysisVisor } from '../systems/Effects.js';
+import { FaunaSystem } from '../systems/Fauna.js';
+import { DayNightCycle } from '../systems/DayNight.js';
+import { DiscoverySystem } from '../systems/Discovery.js';
 import { VoxelWorld } from '../world/VoxelWorld.js';
 import { SpaceScene } from '../world/SpaceScene.js';
 import { PlayerController } from '../entities/Player.js';
@@ -57,6 +60,9 @@ export class Game {
     this.storm = null;
     this.visor = null;
     this.waypoints = null;
+    this.fauna = null;
+    this.dayNight = null;
+    this.discovery = null;
   }
 
   log(text) {
@@ -98,6 +104,11 @@ export class Game {
     this.storm = new StormSystem(this);
     this.visor = new AnalysisVisor(this);
     this.waypoints = new WaypointHUD(this);
+    this.fauna = new FaunaSystem(this);
+    this.dayNight = new DayNightCycle(this);
+    this.discovery = new DiscoverySystem(this);
+    this._baseSky = 0x6ab0d0;
+    this.dayNight.ensureLights();
 
     this.ui.setLoading(0.55, '部署坠毁星舰…');
     await this._delay(50);
@@ -220,6 +231,11 @@ export class Game {
     this.log('我在陌生的方块世界醒来，记忆一片空白… 外骨骼提示：采集铁尘修复扫描器。');
     this.ui.refreshMission();
 
+    // Initial fauna + flora near spawn
+    this.fauna.spawnAround(this.player.position.x, this.player.position.z, 8);
+    this.fauna.spawnFloraProps(this.player.position.x, this.player.position.z, 7);
+    sound.setAmbientMode('planet');
+
     // Pointer lock on click
     this.canvas.addEventListener('click', () => {
       if (!this.ui.anyModalOpen()) this.canvas.requestPointerLock();
@@ -257,28 +273,27 @@ export class Game {
   }
 
   _setupPlanetLights(fogColor = 0x6ab0d0) {
-    // Remove old lights
-    const toRemove = this.scene.children.filter((c) => c.userData.planetLight);
+    this._baseSky = fogColor;
+    // Remove old lights (keep dayNight ones that will be recreated)
+    const toRemove = this.scene.children.filter(
+      (c) => c.userData.planetLight && !c.userData.dayNight
+    );
     toRemove.forEach((c) => this.scene.remove(c));
+    // Also remove previous dayNight lights so they rebuild cleanly
+    const dnRemove = this.scene.children.filter((c) => c.userData.dayNight);
+    dnRemove.forEach((c) => this.scene.remove(c));
+    if (this.dayNight) {
+      this.dayNight.sun = null;
+      this.dayNight.moon = null;
+      this.dayNight.sunMesh = null;
+      this.dayNight.moonMesh = null;
+    }
 
-    const hemi = new THREE.HemisphereLight(0xb8d8f0, 0x3a5a2a, 0.55);
+    const hemi = new THREE.HemisphereLight(0xb8d8f0, 0x3a5a2a, 0.5);
     hemi.userData.planetLight = true;
     this.scene.add(hemi);
 
-    const sun = new THREE.DirectionalLight(0xfff2d0, 1.05);
-    sun.position.set(60, 100, 40);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
-    sun.shadow.camera.near = 1;
-    sun.shadow.camera.far = 200;
-    sun.shadow.camera.left = -60;
-    sun.shadow.camera.right = 60;
-    sun.shadow.camera.top = 60;
-    sun.shadow.camera.bottom = -60;
-    sun.userData.planetLight = true;
-    this.scene.add(sun);
-
-    const fill = new THREE.AmbientLight(0x405060, 0.35);
+    const fill = new THREE.AmbientLight(0x405060, 0.3);
     fill.userData.planetLight = true;
     this.scene.add(fill);
 
@@ -310,17 +325,27 @@ export class Game {
       this._clouds.visible = true;
       this.scene.add(this._clouds);
     }
+
+    // DayNight owns the sun
+    this.dayNight?.ensureLights();
+    sound.setAmbientMode(this.storm?.active ? 'storm' : 'planet');
   }
 
   _setupSpaceLights() {
     const toRemove = this.scene.children.filter((c) => c.userData.planetLight);
     toRemove.forEach((c) => this.scene.remove(c));
+    this.dayNight?.clearRefs();
     if (this._clouds) this._clouds.visible = false;
     const amb = new THREE.AmbientLight(0x304050, 0.4);
     amb.userData.planetLight = true;
     this.scene.add(amb);
+    const sun = new THREE.DirectionalLight(0xfff0d0, 0.6);
+    sun.position.set(-1, 0.4, -0.8);
+    sun.userData.planetLight = true;
+    this.scene.add(sun);
     this.scene.fog = null;
     this.renderer.setClearColor(0x02060c);
+    sound.setAmbientMode('space');
   }
 
   _makeMarker(color) {
@@ -528,6 +553,7 @@ export class Game {
     this.mode = 'space';
     this.spaceGrace = 4; // seconds before atmosphere entry can trigger
     this._setupSpaceLights();
+    this.fauna?.clear();
     if (this.world) {
       this.world.group.visible = false;
     }
@@ -553,6 +579,7 @@ export class Game {
     }
 
     this.space.setActive(false);
+    this.fauna?.clear();
     this._setupPlanetLights(planetDef.atmosphere);
 
     // Rebuild voxel world for this planet
@@ -575,6 +602,10 @@ export class Game {
     if (this._propCrystals) {
       for (const c of this._propCrystals) c.visible = home;
     }
+
+    // Respawn local life
+    this.fauna.spawnAround(0, 0, 10);
+    this.fauna.spawnFloraProps(0, 0, 8);
 
     this.mode = 'ship_planet';
     this.log(`降落于 ${planetDef.name}。按 F 在低空离舰探索。`);
@@ -631,7 +662,12 @@ export class Game {
       this.effects?.setToolVisible(true);
       this._updateCrosshair(!!this.player.targetBlock, this._mining);
 
-      const mining = this._mining && this.player.targetBlock && (this.player.pointerLocked || document.pointerLockElement === this.canvas);
+      // Skip mining blocks while analyzing in visor
+      const mining =
+        this._mining &&
+        this.player.targetBlock &&
+        (this.player.pointerLocked || document.pointerLockElement === this.canvas) &&
+        !(this.visor?.active);
       if (mining) {
         const from = this.camera.position.clone();
         const to = this.player.getMineTargetPoint();
@@ -680,7 +716,9 @@ export class Game {
       this.player.yaw = this.ship.yaw;
       this.player.pitch = this.ship.pitch;
       this.ship.updateCamera(this.camera, dt);
-      this.space.update(dt);
+      const boosting =
+        !!(this.player.keys['ShiftLeft'] || this.player.keys['ShiftRight']) && this.ship.speed > 40;
+      this.space.update(dt, this.ship.position, boosting);
 
       if (this.spaceGrace <= 0) {
         const approach = this.space.findApproach(this.ship.position, 30);
@@ -746,6 +784,8 @@ export class Game {
     this.visor?.update(dt);
     this.waypoints?.update();
     this.effects?.update(dt, this.camera);
+    this.fauna?.update(dt);
+    this.dayNight?.update(dt);
     this.mission.update();
     this.ui.update(dt);
     this.net.update(dt);
@@ -790,6 +830,11 @@ export class Game {
         },
         planet: this.currentPlanetId,
         name: this.playerName,
+        units: this.discovery?.units || 0,
+        fauna: [...(this.fauna?.discovered || [])],
+        flora: [...(this.fauna?.floraDiscovered || [])],
+        minerals: [...(this.discovery?._minerals || [])],
+        dayTime: this.dayNight?.time ?? 0.28,
       };
       localStorage.setItem('voxbound_save', JSON.stringify(data));
     } catch {
@@ -807,6 +852,11 @@ export class Game {
       if (typeof data.mission === 'number') this.mission.stageIndex = data.mission;
       if (data.ship?.pulse) Object.assign(this.ship.pulseEngine, data.ship.pulse);
       if (data.ship?.launch) Object.assign(this.ship.launchThruster, data.ship.launch);
+      if (typeof data.units === 'number' && this.discovery) this.discovery.units = data.units;
+      if (data.fauna && this.fauna) this.fauna.discovered = new Set(data.fauna);
+      if (data.flora && this.fauna) this.fauna.floraDiscovered = new Set(data.flora);
+      if (data.minerals && this.discovery) this.discovery._minerals = new Set(data.minerals);
+      if (typeof data.dayTime === 'number' && this.dayNight) this.dayNight.time = data.dayTime;
       return true;
     } catch {
       return false;

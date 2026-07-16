@@ -196,6 +196,7 @@ export class StormSystem {
     this.game.log('风暴来临！防护急速下降 — 躲进洞穴或建筑。');
     this._spawnRain();
     sound.stormAmbience();
+    sound.setAmbientMode('storm');
     this._stormSoundTimer = 0;
   }
 
@@ -288,6 +289,7 @@ export class StormSystem {
       this.particles.material.dispose();
       this.particles = null;
     }
+    sound.setAmbientMode('planet');
     this.game.log('风暴消散。');
   }
 }
@@ -301,6 +303,7 @@ export class AnalysisVisor {
     this.active = false;
     this.tags = [];
     this.overlay = null;
+    this.focusTarget = null;
   }
 
   ensureUI() {
@@ -311,6 +314,9 @@ export class AnalysisVisor {
     this.overlay.innerHTML = `
       <div class="visor-frame"></div>
       <div class="visor-label">分析面罩 · ANALYSIS VISOR</div>
+      <div class="visor-hint">对准目标 · 按住 左键 分析</div>
+      <div id="visor-scan-bar" class="hidden"><div id="visor-scan-fill"></div></div>
+      <div id="visor-focus" class="hidden"></div>
       <div id="visor-tags"></div>
     `;
     document.getElementById('game-ui').appendChild(this.overlay);
@@ -326,27 +332,50 @@ export class AnalysisVisor {
     this.overlay.classList.toggle('hidden', !on);
     if (on) {
       this.game.ui.showScan();
+    } else {
+      this.game.discovery.scanProgress = 0;
+      this.game.discovery.scanning = null;
+      this.focusTarget = null;
     }
   }
 
   update(dt) {
     if (!this.active || this.game.mode !== 'planet') {
-      if (this.overlay && !this.overlay.classList.contains('hidden') && !this.active) {
-        /* noop */
-      }
       return;
     }
+    this.ensureUI();
     const tagsEl = document.getElementById('visor-tags');
+    const focusEl = document.getElementById('visor-focus');
+    const bar = document.getElementById('visor-scan-bar');
+    const fill = document.getElementById('visor-scan-fill');
     if (!tagsEl) return;
     tagsEl.innerHTML = '';
 
-    const origin = this.game.player.position;
+    const origin = this.game.camera.position.clone();
+    const dir = this.game.player.lookDir;
     const findings = [];
-    // Sample nearby surface for resources
-    for (let dx = -12; dx <= 12; dx += 2) {
-      for (let dz = -12; dz <= 12; dz += 2) {
-        const x = Math.floor(origin.x) + dx;
-        const z = Math.floor(origin.z) + dz;
+
+    // Fauna tags
+    for (const c of this.game.fauna.creatures) {
+      if (!c.mesh.visible) continue;
+      const known = this.game.fauna.discovered.has(c.type.id);
+      findings.push({
+        x: c.mesh.position.x,
+        y: c.mesh.position.y + 1.2,
+        z: c.mesh.position.z,
+        label: known ? c.type.name : '???',
+        color: known ? '#6bcf5a' : '#e8453c',
+        kind: 'fauna',
+        creature: c,
+      });
+    }
+
+    // Resources
+    const ppos = this.game.player.position;
+    for (let dx = -14; dx <= 14; dx += 3) {
+      for (let dz = -14; dz <= 14; dz += 3) {
+        const x = Math.floor(ppos.x) + dx;
+        const z = Math.floor(ppos.z) + dz;
         const y = this.game.world.surfaceY(x, z);
         const id = this.game.world.getBlock(x, y, z);
         if (
@@ -357,20 +386,29 @@ export class AnalysisVisor {
           id === BLOCKS.CRYSTAL ||
           id === BLOCKS.COPPER_ORE
         ) {
-          findings.push({ x, y, z, id });
+          findings.push({
+            x,
+            y: y + 1,
+            z,
+            id,
+            label: BLOCK_NAMES[id] || '资源',
+            color: '#3ecfb4',
+            kind: id === BLOCKS.SODIUM_PLANT || id === BLOCKS.CARBON_PLANT ? 'flora' : 'mineral',
+            floraId: id === BLOCKS.SODIUM_PLANT ? 'spike_bloom' : id === BLOCKS.CARBON_PLANT ? 'bulb_stalk' : null,
+            mineralId: String(id),
+          });
         }
       }
     }
 
-    // Also tag ship / building
     if (this.game.shipMarker?.visible) {
       findings.push({
         x: this.game.ship.position.x,
         y: this.game.ship.position.y + 3,
         z: this.game.ship.position.z,
-        id: 'ship',
         label: '坠毁星舰',
         color: '#e8a832',
+        kind: 'poi',
       });
     }
     if (this.game.buildingMarker?.visible) {
@@ -378,29 +416,98 @@ export class AnalysisVisor {
         x: this.game.building.position.x,
         y: this.game.building.position.y + 4,
         z: this.game.building.position.z,
-        id: 'building',
         label: '废弃建筑',
         color: '#3ecfb4',
+        kind: 'poi',
       });
     }
 
     const cam = this.game.camera;
-    for (const f of findings.slice(0, 24)) {
-      const world = new THREE.Vector3(f.x + 0.5, f.y + 1.2, f.z + 0.5);
+    for (const f of findings.slice(0, 30)) {
+      const world = new THREE.Vector3(f.x + (f.id != null ? 0.5 : 0), f.y, f.z + (f.id != null ? 0.5 : 0));
       const ndc = world.clone().project(cam);
-      if (ndc.z > 1 || Math.abs(ndc.x) > 1.1 || Math.abs(ndc.y) > 1.1) continue;
+      if (ndc.z > 1 || Math.abs(ndc.x) > 1.15 || Math.abs(ndc.y) > 1.15) continue;
       const sx = (ndc.x * 0.5 + 0.5) * 100;
       const sy = (-ndc.y * 0.5 + 0.5) * 100;
-      const label = f.label || BLOCK_NAMES[f.id] || '资源';
-      const color = f.color || '#3ecfb4';
       const dist = origin.distanceTo(world).toFixed(0);
       const tag = document.createElement('div');
       tag.className = 'visor-tag';
       tag.style.left = `${sx}%`;
       tag.style.top = `${sy}%`;
-      tag.style.borderColor = color;
-      tag.innerHTML = `<span class="vt-name" style="color:${color}">${label}</span><span class="vt-dist">${dist}u</span>`;
+      tag.style.borderColor = f.color;
+      tag.innerHTML = `<span class="vt-name" style="color:${f.color}">${f.label}</span><span class="vt-dist">${dist}u</span>`;
       tagsEl.appendChild(tag);
+    }
+
+    // Focus target under crosshair
+    let focus = null;
+    const creature = this.game.fauna.raycastCreature(origin, dir, 22);
+    if (creature) {
+      focus = {
+        kind: 'fauna',
+        key: `fauna:${creature.type.id}:${creature.mesh.uuid}`,
+        creature,
+        label: this.game.fauna.discovered.has(creature.type.id) ? creature.type.name : '未知生物',
+        duration: 1.8,
+      };
+    } else if (this.game.player.targetBlock) {
+      const { id, x, y, z } = this.game.player.targetBlock;
+      const isFlora = id === BLOCKS.SODIUM_PLANT || id === BLOCKS.CARBON_PLANT || id === BLOCKS.LEAVES;
+      const isMineral =
+        id === BLOCKS.FERRITE_ROCK ||
+        id === BLOCKS.STONE ||
+        id === BLOCKS.CRYSTAL ||
+        id === BLOCKS.COPPER_ORE ||
+        id === BLOCKS.DIHYDROGEN;
+      if (isFlora || isMineral) {
+        focus = {
+          kind: isFlora ? 'flora' : 'mineral',
+          key: `${isFlora ? 'flora' : 'min'}:${id}:${x},${z}`,
+          label: BLOCK_NAMES[id] || '目标',
+          floraId: id === BLOCKS.SODIUM_PLANT ? 'spike_bloom' : id === BLOCKS.CARBON_PLANT ? 'bulb_stalk' : 'fan_leaf',
+          mineralId: `${id}`,
+          units: isMineral ? 120 : 200,
+          duration: 1.4,
+        };
+      }
+    }
+    this.focusTarget = focus;
+
+    if (focus) {
+      focusEl.classList.remove('hidden');
+      focusEl.innerHTML = `<div class="vf-name">${focus.label}</div><div class="vf-sub">按住左键进行分析</div>`;
+    } else {
+      focusEl.classList.add('hidden');
+    }
+
+    // Hold LMB to scan
+    const holding = this.game._mining;
+    if (holding && focus && (focus.kind === 'fauna' || focus.kind === 'flora' || focus.kind === 'mineral')) {
+      const result = this.game.discovery.updateScan(dt, focus);
+      if (result && result.progress != null) {
+        bar.classList.remove('hidden');
+        fill.style.width = `${result.progress * 100}%`;
+        this._scanChirp = (this._scanChirp || 0) + dt;
+        if (this._scanChirp > 0.22) {
+          this._scanChirp = 0;
+          sound.scanPulse(result.progress);
+        }
+      } else {
+        bar.classList.add('hidden');
+        fill.style.width = '0%';
+      }
+      if (result && result.new) {
+        bar.classList.add('hidden');
+        sound.discoverFanfare();
+      } else if (result && result.already) {
+        bar.classList.add('hidden');
+        sound.uiClick();
+      }
+    } else {
+      this.game.discovery.scanProgress = 0;
+      this.game.discovery.scanning = null;
+      this._scanChirp = 0;
+      bar.classList.add('hidden');
     }
   }
 }

@@ -238,26 +238,100 @@ export class SoundManager {
 
   _startAmbient() {
     if (!this.ctx) return;
-    // Soft space drone
+    // Soft drone — mode levels adjusted via setAmbientMode
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = 'sine';
     osc.frequency.value = 55;
-    gain.gain.value = 0.025;
+    gain.gain.value = 0.022;
     osc.connect(gain);
     gain.connect(this.master);
     osc.start();
     this.ambientNodes.push(osc, gain);
+    this._ambGainA = gain;
+    this._ambOscA = osc;
 
     const osc2 = this.ctx.createOscillator();
     const gain2 = this.ctx.createGain();
     osc2.type = 'triangle';
     osc2.frequency.value = 82.5;
-    gain2.gain.value = 0.015;
+    gain2.gain.value = 0.012;
     osc2.connect(gain2);
     gain2.connect(this.master);
     osc2.start();
     this.ambientNodes.push(osc2, gain2);
+    this._ambGainB = gain2;
+    this._ambOscB = osc2;
+
+    // Wind / atmosphere noise bed
+    const len = this.ctx.sampleRate * 2;
+    const buffer = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * 0.4;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 400;
+    const windGain = this.ctx.createGain();
+    windGain.gain.value = 0.018;
+    src.connect(filter);
+    filter.connect(windGain);
+    windGain.connect(this.master);
+    src.start();
+    this.ambientNodes.push(src, windGain);
+    this._windGain = windGain;
+    this._windFilter = filter;
+    this._ambientMode = 'planet';
+  }
+
+  /** Switch ambient bed: planet | space | storm */
+  setAmbientMode(mode) {
+    if (!this.ctx || !this._ambGainA) return;
+    if (this._ambientMode === mode) return;
+    this._ambientMode = mode;
+    const t = this._now() + 0.4;
+    if (mode === 'space') {
+      this._ambGainA.gain.linearRampToValueAtTime(0.035, t);
+      this._ambGainB.gain.linearRampToValueAtTime(0.02, t);
+      this._ambOscA.frequency.linearRampToValueAtTime(42, t);
+      this._ambOscB.frequency.linearRampToValueAtTime(63, t);
+      this._windGain.gain.linearRampToValueAtTime(0.004, t);
+      this._windFilter.frequency.linearRampToValueAtTime(180, t);
+    } else if (mode === 'storm') {
+      this._ambGainA.gain.linearRampToValueAtTime(0.015, t);
+      this._ambGainB.gain.linearRampToValueAtTime(0.01, t);
+      this._windGain.gain.linearRampToValueAtTime(0.045, t);
+      this._windFilter.frequency.linearRampToValueAtTime(280, t);
+    } else {
+      this._ambGainA.gain.linearRampToValueAtTime(0.022, t);
+      this._ambGainB.gain.linearRampToValueAtTime(0.012, t);
+      this._ambOscA.frequency.linearRampToValueAtTime(55, t);
+      this._ambOscB.frequency.linearRampToValueAtTime(82.5, t);
+      this._windGain.gain.linearRampToValueAtTime(0.018, t);
+      this._windFilter.frequency.linearRampToValueAtTime(400, t);
+    }
+  }
+
+  /** Soft chirp while holding analysis scan */
+  scanPulse(progress = 0) {
+    if (!this.ctx || !this.enabled) return;
+    const f = 420 + progress * 900;
+    this._tone(f, 0.05, 'square', 0.04);
+    this._tone(f * 1.5, 0.04, 'triangle', 0.03);
+  }
+
+  discoverFanfare() {
+    [660, 880, 1174, 1320].forEach((f, i) => {
+      setTimeout(() => this._tone(f, 0.12, 'triangle', 0.1), i * 70);
+    });
+  }
+
+  faunaCall() {
+    const base = 180 + Math.random() * 220;
+    this._tone(base, 0.12, 'sine', 0.05);
+    this._tone(base * 1.4, 0.1, 'triangle', 0.04);
   }
 }
 

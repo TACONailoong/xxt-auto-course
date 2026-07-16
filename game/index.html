@@ -38,7 +38,7 @@
         <div class="title-hints">
           <span>WASD 移动</span>
           <span>鼠标 视角</span>
-          <span>左键 开采</span>
+          <span>左键 开采/分析</span>
           <span>E 交互</span>
           <span>F 进入飞船</span>
           <span>R 扫描</span>
@@ -101,6 +101,15 @@
       <!-- Resource quick bar -->
       <div id="resource-strip"></div>
 
+      <!-- Units + time -->
+      <div id="meta-panel">
+        <div id="units-display"><span class="meta-label">UNITS</span> <span id="units-value">0</span></div>
+        <div id="time-display"><span id="time-phase">日间</span> <span id="time-clock">00:00</span></div>
+      </div>
+
+      <!-- Units gain toast -->
+      <div id="units-toast" class="hidden"></div>
+
       <!-- Interaction prompt -->
       <div id="interact-prompt" class="hidden">
         <kbd>E</kbd> <span id="interact-text">交互</span>
@@ -132,6 +141,11 @@
           <div class="ret-corner br"></div>
         </div>
         <div id="altitude-readout">ALT <span id="alt-value">0</span></div>
+        <div id="space-nav" class="hidden">
+          <div class="nav-label">导航锁定</div>
+          <div id="nav-target">—</div>
+          <div id="nav-dist">—</div>
+        </div>
       </div>
 
       <!-- Planet entry cinematic overlay -->

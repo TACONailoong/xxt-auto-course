@@ -45,6 +45,25 @@ export class UIManager {
         return `<div class="res-chip"><span class="name">${def.icon} ${def.name}</span><span class="qty">${qty}</span></div>`;
       })
       .join('');
+
+    // Units + clock
+    const uv = document.getElementById('units-value');
+    if (uv && this.game.discovery) uv.textContent = this.game.discovery.units.toLocaleString();
+    const phase = document.getElementById('time-phase');
+    const clock = document.getElementById('time-clock');
+    if (phase && this.game.dayNight) {
+      phase.textContent = this.game.dayNight.label;
+      clock.textContent = this.game.dayNight.clockStr;
+    }
+  }
+
+  showUnitsGain(n, reason) {
+    const el = document.getElementById('units-toast');
+    if (!el) return;
+    el.textContent = `+${n}u  ${reason || ''}`;
+    el.classList.remove('hidden');
+    clearTimeout(this._unitsToast);
+    this._unitsToast = setTimeout(() => el.classList.add('hidden'), 1800);
   }
 
   refreshHotbar() {
@@ -94,6 +113,23 @@ export class UIManager {
     document.getElementById('sys-pulse').classList.toggle('broken', !ship.pulseEngine.repaired);
     document.getElementById('sys-launch').classList.toggle('broken', !ship.launchThruster.repaired);
     document.getElementById('alt-value').textContent = Math.round(ship.position.y);
+
+    const nav = document.getElementById('space-nav');
+    if (nav) {
+      if (this.game.mode === 'space' && this.game.space) {
+        nav.classList.remove('hidden');
+        const info = this.game.space.nearestInfo(ship.position);
+        if (info) {
+          document.getElementById('nav-target').textContent = info.def.name;
+          const d = Math.max(0, Math.round(info.dist));
+          document.getElementById('nav-dist').textContent =
+            d < 25 ? '大气进入区' : `${d}u`;
+          nav.classList.toggle('approach', d < 40);
+        }
+      } else {
+        nav.classList.add('hidden');
+      }
+    }
   }
 
   refreshTargetInfo() {
