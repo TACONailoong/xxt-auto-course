@@ -30,6 +30,12 @@
   const pickNextCatalogItem = DOM.pickNextCatalogItem;
   const shouldLogStatusChange = DOM.shouldLogStatusChange || ((a, b) => a !== b);
   const isExtensionAlive = DOM.isExtensionAlive || (() => true);
+  const formatSessionStats =
+    DOM.formatSessionStats ||
+    ((stats) =>
+      `本会话 · 切章 ${stats.nextCount || 0} · 答题 ${stats.answerCount || 0}`);
+  const createEmptyStats =
+    DOM.createEmptyStats || (() => ({ nextCount: 0, answerCount: 0, startedAt: Date.now() }));
 
   const IS_TOP = window.top === window.self;
   const STATUS_KEY =
@@ -58,7 +64,7 @@
       this.stallLastWall = 0;
       this.dead = false;
       this.hudLayout = { left: null, top: null, compact: false };
-      this.stats = { nextCount: 0, answerCount: 0, startedAt: Date.now() };
+      this.stats = createEmptyStats();
       this.dragState = null;
       this.hudDragBound = false;
       this.status = {
@@ -130,14 +136,22 @@
       if (!this.ensureAlive()) return;
       try {
         chrome.storage.onChanged.addListener((changes, area) => {
-          if (!this.ensureAlive() || area !== 'sync') return;
-          for (const key of Object.keys(DEFAULT_SETTINGS)) {
-            if (changes[key]) this.settings[key] = changes[key].newValue;
+          if (!this.ensureAlive()) return;
+          if (area === 'sync') {
+            for (const key of Object.keys(DEFAULT_SETTINGS)) {
+              if (changes[key]) this.settings[key] = changes[key].newValue;
+            }
+            this.applySettings();
+            if (IS_TOP) {
+              this.ensureHud();
+              this.updateHud();
+            }
           }
-          this.applySettings();
-          if (IS_TOP) {
-            this.ensureHud();
+          if (area === 'local' && changes[STATS_KEY] && IS_TOP) {
+            const next = changes[STATS_KEY].newValue;
+            this.stats = next && typeof next === 'object' ? next : createEmptyStats();
             this.updateHud();
+            this.publishStatus(true);
           }
         });
       } catch (error) {
@@ -447,6 +461,15 @@
         };
         dragHandle.style.cursor = 'grabbing';
       });
+      dragHandle.addEventListener('dblclick', async e => {
+        if (e.target.closest('button')) return;
+        e.preventDefault();
+        this.hudLayout.left = null;
+        this.hudLayout.top = null;
+        await this.saveHudLayout();
+        this.applyHudPosition();
+        this.pushLog('浮层位置已复位');
+      });
 
       root.querySelector('[data-role="compact-view"]').addEventListener('mousedown', e => {
         e.preventDefault();
@@ -576,7 +599,7 @@
       chapter.textContent = this.status.chapter || '未识别当前章节';
       toggle.textContent = this.settings.isRunning ? '暂停' : '开始';
       fill.style.width = `${pct}%`;
-      stats.textContent = `本会话 · 切章 ${this.stats.nextCount} · 答题 ${this.stats.answerCount}`;
+      stats.textContent = formatSessionStats(this.stats);
 
       if (!this.settings.isRunning) {
         detail.textContent = '已停止';
@@ -939,10 +962,11 @@
       if (Date.now() - this.lastAnswerAt < 3000) return;
       const dialog = this.findQuestionDialog();
       if (!dialog) return;
-      if (this.answerQuestion(dialog)) {
+      const result = this.answerQuestion(dialog);
+      if (result && result.handled) {
         this.lastAnswerAt = Date.now();
         this.setStatus('answer', '已自动作答弹窗题');
-        this.bumpStat('answerCount');
+        if (result.fresh) this.bumpStat('answerCount');
       }
     }
 
@@ -994,15 +1018,18 @@
             (!el.matches('input[type="radio"]') && !el.matches('input[type="checkbox"]'))
         );
 
-        let selected = false;
+        let handled = false;
+        let fresh = false;
 
         if (radios.length > 0) {
+          handled = true;
           if (!radios.some(r => r.checked)) {
             safeClick(radios[Math.floor(Math.random() * radios.length)]);
             this.log('自动答题：随机单选');
+            fresh = true;
           }
-          selected = true;
         } else if (checkboxes.length > 0) {
+          handled = true;
           if (!checkboxes.some(c => c.checked)) {
             const count = Math.max(1, Math.ceil(checkboxes.length / 2));
             [...checkboxes]
@@ -1010,20 +1037,26 @@
               .slice(0, count)
               .forEach(box => safeClick(box));
             this.log('自动答题：随机多选');
+            fresh = true;
           }
-          selected = true;
         } else if (customOpts.length > 0) {
-          safeClick(customOpts[Math.floor(Math.random() * customOpts.length)]);
-          this.log('自动答题：点击自定义选项');
-          selected = true;
+          // 自定义选项难以判断是否已选，仅首次点击计为新作答
+          const marked = container.dataset.xxtAnswered === '1';
+          handled = true;
+          if (!marked) {
+            safeClick(customOpts[Math.floor(Math.random() * customOpts.length)]);
+            container.dataset.xxtAnswered = '1';
+            this.log('自动答题：点击自定义选项');
+            fresh = true;
+          }
         }
 
-        if (!selected) return false;
+        if (!handled) return { handled: false, fresh: false };
         setTimeout(() => this.clickSubmitButton(container), randomDelay(500, 900));
-        return true;
+        return { handled: true, fresh };
       } catch (error) {
         this.log('自动答题失败:', error);
-        return false;
+        return { handled: false, fresh: false };
       }
     }
 

@@ -19,9 +19,22 @@ const LOG_KEY = (typeof XXT_LOG_KEY !== 'undefined' && XXT_LOG_KEY) || 'xxtActiv
 const STATS_KEY = (typeof XXT_STATS_KEY !== 'undefined' && XXT_STATS_KEY) || 'xxtSessionStats';
 const MORE_OPEN_KEY =
   (typeof XXT_MORE_OPEN_KEY !== 'undefined' && XXT_MORE_OPEN_KEY) || 'xxtMoreOpen';
+
 const formatProgress =
   (typeof xxtFormatProgress === 'function' && xxtFormatProgress) ||
   (p => Math.round((Number(p) || 0) * 100));
+const formatSessionStats =
+  (typeof xxtFormatSessionStats === 'function' && xxtFormatSessionStats) ||
+  ((stats) => `本会话 · 切章 ${stats.nextCount || 0} · 答题 ${stats.answerCount || 0}`);
+const summarizeOptions =
+  (typeof xxtSummarizeOptions === 'function' && xxtSummarizeOptions) ||
+  (() => []);
+const isHighSpeed =
+  (typeof xxtIsHighSpeed === 'function' && xxtIsHighSpeed) ||
+  (speed => Number(speed) > 2);
+const createEmptyStats =
+  (typeof xxtCreateEmptyStats === 'function' && xxtCreateEmptyStats) ||
+  (() => ({ nextCount: 0, answerCount: 0, startedAt: Date.now() }));
 
 let settings = { ...DEFAULT_SETTINGS };
 let saveTimer = null;
@@ -76,6 +89,34 @@ function bindEvents() {
         await chrome.storage.local.set({ [MORE_OPEN_KEY]: more.open });
       } catch (_) {}
     });
+  }
+
+  const resetStats = () => resetSessionStats();
+  const resetStatsBtn = document.getElementById('resetStatsBtn');
+  const resetStatsQuickBtn = document.getElementById('resetStatsQuickBtn');
+  if (resetStatsBtn) resetStatsBtn.addEventListener('click', resetStats);
+  if (resetStatsQuickBtn) resetStatsQuickBtn.addEventListener('click', resetStats);
+
+  const resetDefaultsBtn = document.getElementById('resetDefaultsBtn');
+  if (resetDefaultsBtn) {
+    resetDefaultsBtn.addEventListener('click', async () => {
+      settings = { ...DEFAULT_SETTINGS };
+      updateUI();
+      await chrome.storage.sync.set(settings);
+      showSaveHint('已恢复默认设置');
+    });
+  }
+}
+
+async function resetSessionStats() {
+  const empty = createEmptyStats();
+  try {
+    await chrome.storage.local.set({ [STATS_KEY]: empty });
+    const statsRow = document.getElementById('statsRow');
+    if (statsRow) statsRow.textContent = formatSessionStats(empty);
+    showSaveHint('会话统计已重置');
+  } catch (error) {
+    console.error('重置统计失败:', error);
   }
 }
 
@@ -141,10 +182,8 @@ async function refreshLiveStatus() {
   try {
     const result = await chrome.storage.local.get([STATUS_KEY, STATS_KEY]);
     const status = result[STATUS_KEY];
-    const stats = result[STATS_KEY] || (status && status.stats) || {};
-    const nextCount = Number(stats.nextCount) || 0;
-    const answerCount = Number(stats.answerCount) || 0;
-    statsRow.textContent = `本会话 · 切章 ${nextCount} · 答题 ${answerCount}`;
+    const stats = result[STATS_KEY] || (status && status.stats) || createEmptyStats();
+    statsRow.textContent = formatSessionStats(stats);
 
     if (!status || Date.now() - (status.updatedAt || 0) > 15000) {
       liveChapter.textContent = '尚未连接课程页';
@@ -213,10 +252,18 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+function updateOptionChips() {
+  const box = document.getElementById('optionChips');
+  if (!box) return;
+  const chips = summarizeOptions(settings);
+  box.innerHTML = chips.map(text => `<span>${escapeHtml(text)}</span>`).join('');
+}
+
 function updateUI() {
   const statusDot = document.getElementById('statusDot');
   const statusText = document.getElementById('statusText');
   const hero = document.querySelector('.hero');
+  const speedWarn = document.getElementById('speedWarn');
 
   if (statusDot) statusDot.classList.toggle('active', settings.isRunning);
   statusText.classList.toggle('active', settings.isRunning);
@@ -233,10 +280,13 @@ function updateUI() {
 
   document.getElementById('speedSlider').value = settings.playbackSpeed;
   document.getElementById('speedValue').textContent = settings.playbackSpeed + 'x';
+  if (speedWarn) speedWarn.hidden = !isHighSpeed(settings.playbackSpeed);
 
   document.querySelectorAll('.preset-btn').forEach(btn => {
     btn.classList.toggle('active', parseFloat(btn.dataset.speed) === settings.playbackSpeed);
   });
+
+  updateOptionChips();
 }
 
 function setToggle(id, active) {
@@ -246,8 +296,9 @@ function setToggle(id, active) {
   el.setAttribute('aria-checked', active ? 'true' : 'false');
 }
 
-function showSaveHint() {
+function showSaveHint(message) {
   const hint = document.getElementById('saveHint');
+  hint.textContent = message || '已自动保存';
   hint.classList.add('show');
   clearTimeout(hintTimer);
   hintTimer = setTimeout(() => hint.classList.remove('show'), 1200);

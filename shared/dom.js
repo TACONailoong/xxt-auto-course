@@ -69,6 +69,43 @@ function xxtIsExtensionAlive() {
   }
 }
 
+function xxtFormatDuration(ms) {
+  const totalSec = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}小时${m}分`;
+  if (m > 0) return `${m}分${s}秒`;
+  return `${s}秒`;
+}
+
+function xxtFormatSessionStats(stats, now = Date.now()) {
+  const nextCount = Number(stats && stats.nextCount) || 0;
+  const answerCount = Number(stats && stats.answerCount) || 0;
+  const startedAt = Number(stats && stats.startedAt) || now;
+  const duration = xxtFormatDuration(now - startedAt);
+  return `本会话 · ${duration} · 切章 ${nextCount} · 答题 ${answerCount}`;
+}
+
+function xxtSummarizeOptions(settings) {
+  const chips = [];
+  if (settings.autoAnswer) chips.push('答题');
+  if (settings.mute) chips.push('静音');
+  if (settings.skipQuiz) chips.push('跳过测验');
+  if (settings.autoNext) chips.push('自动下一节');
+  if (settings.dismissIdle) chips.push('防挂机');
+  if (settings.showHud) chips.push('浮层');
+  return chips;
+}
+
+function xxtIsHighSpeed(speed) {
+  return Number(speed) > 2;
+}
+
+function xxtCreateEmptyStats(now = Date.now()) {
+  return { nextCount: 0, answerCount: 0, startedAt: now };
+}
+
 const XXT_DOM = {
   isVisible: xxtIsVisible,
   safeClick: xxtSafeClick,
@@ -78,7 +115,12 @@ const XXT_DOM = {
   normalizeText: xxtNormalizeText,
   pickNextCatalogItem: xxtPickNextCatalogItem,
   shouldLogStatusChange: xxtShouldLogStatusChange,
-  isExtensionAlive: xxtIsExtensionAlive
+  isExtensionAlive: xxtIsExtensionAlive,
+  formatDuration: xxtFormatDuration,
+  formatSessionStats: xxtFormatSessionStats,
+  summarizeOptions: xxtSummarizeOptions,
+  isHighSpeed: xxtIsHighSpeed,
+  createEmptyStats: xxtCreateEmptyStats
 };
 
 if (typeof globalThis !== 'undefined') {
@@ -92,7 +134,12 @@ if (typeof globalThis !== 'undefined') {
     xxtNormalizeText,
     xxtPickNextCatalogItem,
     xxtShouldLogStatusChange,
-    xxtIsExtensionAlive
+    xxtIsExtensionAlive,
+    xxtFormatDuration,
+    xxtFormatSessionStats,
+    xxtSummarizeOptions,
+    xxtIsHighSpeed,
+    xxtCreateEmptyStats
   });
 }
 

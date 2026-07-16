@@ -192,7 +192,62 @@ body::before {
   font-size: 11px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
+
+.speed-warn {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--warn);
+  line-height: 1.4;
+}
+
+.more-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.option-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.option-chips:empty { display: none; }
+
+.option-chips span {
+  font-size: 10px;
+  color: var(--accent-deep);
+  background: rgba(31, 122, 102, 0.10);
+  border: 1px solid rgba(31, 122, 102, 0.16);
+  border-radius: 4px;
+  padding: 1px 6px;
+  line-height: 1.5;
+}
+
+.more[open] .option-chips { display: none; }
+
+.more-actions {
+  display: flex;
+  gap: 12px;
+  padding: 4px 0 10px;
+}
+
+.text-btn {
+  border: none;
+  background: transparent;
+  color: var(--accent-deep);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.text-btn:hover { text-decoration: underline; }
 
 .progress {
   margin-top: 10px;

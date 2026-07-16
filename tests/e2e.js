@@ -189,12 +189,23 @@ function sleep(ms) {
       const statsText = await popup.$eval('#statsRow', el => el.textContent);
       check(
         '弹窗显示会话统计',
-        /切章\s*[1-9]/.test(statsText) && /答题\s*[1-9]/.test(statsText),
+        /切章\s*[1-9]/.test(statsText) && /答题\s*1\b/.test(statsText),
         statsText
       );
 
+      const chips = await popup.$eval('#optionChips', el => el.textContent);
+      check('折叠区显示选项摘要', chips.includes('静音') && chips.includes('答题'), chips);
+
+      await popup.click('.preset-btn[data-speed="3"]');
+      await sleep(200);
+      const warnHidden = await popup.$eval('#speedWarn', el => el.hidden);
+      check('高倍速显示风险提示', warnHidden === false);
+
       const online = await popup.$eval('#nowPanel', el => el.classList.contains('is-online'));
       check('弹窗处于已连接态', online);
+
+      // 恢复到 2x，供后续即时保存断言使用
+      await popup.click('.preset-btn[data-speed="2"]');
 
       const aria = await popup.$eval('#toggleAuto', el => el.getAttribute('aria-checked'));
       check('开关具备无障碍属性', aria === 'true' || aria === 'false', `aria-checked=${aria}`);

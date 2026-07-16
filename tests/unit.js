@@ -75,5 +75,43 @@ test('shouldLogStatusChange', () => {
   assert.strictEqual(DOM.shouldLogStatusChange('a', ''), false);
 });
 
+test('formatDuration', () => {
+  assert.strictEqual(DOM.formatDuration(5000), '5秒');
+  assert.strictEqual(DOM.formatDuration(65000), '1分5秒');
+  assert.strictEqual(DOM.formatDuration(3661000), '1小时1分');
+});
+
+test('formatSessionStats', () => {
+  const text = DOM.formatSessionStats(
+    { nextCount: 2, answerCount: 1, startedAt: Date.now() - 5000 },
+    Date.now()
+  );
+  assert.ok(text.includes('切章 2'));
+  assert.ok(text.includes('答题 1'));
+  assert.ok(text.includes('秒') || text.includes('分'));
+});
+
+test('summarizeOptions', () => {
+  const chips = DOM.summarizeOptions({
+    autoAnswer: true,
+    mute: true,
+    skipQuiz: false,
+    autoNext: true,
+    dismissIdle: false,
+    showHud: true
+  });
+  assert.deepStrictEqual(chips, ['答题', '静音', '自动下一节', '浮层']);
+});
+
+test('isHighSpeed', () => {
+  assert.strictEqual(DOM.isHighSpeed(2), false);
+  assert.strictEqual(DOM.isHighSpeed(2.25), true);
+});
+
+test('createEmptyStats', () => {
+  const stats = DOM.createEmptyStats(123);
+  assert.deepStrictEqual(stats, { nextCount: 0, answerCount: 0, startedAt: 123 });
+});
+
 console.log(failed === 0 ? '\n单元测试全部通过' : `\n单元测试失败: ${failed}`);
 process.exit(failed === 0 ? 0 : 1);
