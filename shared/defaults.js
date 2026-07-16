@@ -9,7 +9,10 @@ const XXT_DEFAULT_SETTINGS = {
   skipQuiz: true,
   autoNext: true,
   dismissIdle: true,
-  showHud: true
+  showHud: true,
+  stopWhenDone: true,
+  maxChapters: 0,
+  maxMinutes: 0
 };
 
 const XXT_STATUS_KEY = 'xxtRuntimeStatus';
@@ -18,6 +21,7 @@ const XXT_LOG_LIMIT = 40;
 const XXT_HUD_LAYOUT_KEY = 'xxtHudLayout';
 const XXT_STATS_KEY = 'xxtSessionStats';
 const XXT_MORE_OPEN_KEY = 'xxtMoreOpen';
+const XXT_FINGERPRINT_LIMIT = 80;
 
 if (typeof globalThis !== 'undefined') {
   globalThis.XXT_DEFAULT_SETTINGS = XXT_DEFAULT_SETTINGS;
@@ -27,4 +31,5 @@ if (typeof globalThis !== 'undefined') {
   globalThis.XXT_HUD_LAYOUT_KEY = XXT_HUD_LAYOUT_KEY;
   globalThis.XXT_STATS_KEY = XXT_STATS_KEY;
   globalThis.XXT_MORE_OPEN_KEY = XXT_MORE_OPEN_KEY;
+  globalThis.XXT_FINGERPRINT_LIMIT = XXT_FINGERPRINT_LIMIT;
 }

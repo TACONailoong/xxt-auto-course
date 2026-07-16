@@ -124,6 +124,25 @@
           </div>
           <div class="toggle-switch" id="toggleShowHud" role="switch" tabindex="0" aria-checked="false" aria-label="显示页面浮层"></div>
         </div>
+        <div class="control-row">
+          <div class="text">
+            <span class="title">学完自动暂停</span>
+            <span class="desc">目录无未完成小节时停止</span>
+          </div>
+          <div class="toggle-switch" id="toggleStopWhenDone" role="switch" tabindex="0" aria-checked="false" aria-label="学完自动暂停"></div>
+        </div>
+        <div class="limit-grid">
+          <label class="limit-field">
+            <span>本会话最多切章</span>
+            <input id="maxChaptersInput" type="number" min="0" max="999" step="1" value="0">
+            <em>0 表示不限制</em>
+          </label>
+          <label class="limit-field">
+            <span>本会话最多分钟</span>
+            <input id="maxMinutesInput" type="number" min="0" max="1440" step="1" value="0">
+            <em>0 表示不限制</em>
+          </label>
+        </div>
         <div class="more-actions">
           <button class="text-btn" id="resetStatsBtn" type="button">重置会话统计</button>
           <button class="text-btn" id="resetDefaultsBtn" type="button">恢复默认设置</button>
@@ -150,7 +169,7 @@
     </section>
 
     <p class="save-hint" id="saveHint" role="status">已自动保存</p>
-    <footer class="footer">v1.8.0 · 仅供学习交流</footer>
+    <footer class="footer">v1.9.0 · 仅供学习交流</footer>
   </main>
 
   <!-- 兼容旧测试选择器 -->

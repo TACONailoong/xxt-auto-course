@@ -10,7 +10,10 @@ const DEFAULT_SETTINGS =
     skipQuiz: true,
     autoNext: true,
     dismissIdle: true,
-    showHud: true
+    showHud: true,
+    stopWhenDone: true,
+    maxChapters: 0,
+    maxMinutes: 0
   };
 
 const STATUS_KEY =
@@ -62,6 +65,21 @@ function bindEvents() {
   bindToggle('toggleAutoNext', 'autoNext');
   bindToggle('toggleDismissIdle', 'dismissIdle');
   bindToggle('toggleShowHud', 'showHud');
+  bindToggle('toggleStopWhenDone', 'stopWhenDone');
+
+  const bindLimitInput = (id, key) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('change', () => {
+      const value = Math.max(0, Math.min(9999, parseInt(el.value, 10) || 0));
+      settings[key] = value;
+      el.value = String(value);
+      updateUI();
+      scheduleSave();
+    });
+  };
+  bindLimitInput('maxChaptersInput', 'maxChapters');
+  bindLimitInput('maxMinutesInput', 'maxMinutes');
 
   document.getElementById('speedSlider').addEventListener('input', event => {
     settings.playbackSpeed = parseFloat(event.target.value);
@@ -341,6 +359,12 @@ function updateUI() {
   setToggle('toggleAutoNext', settings.autoNext);
   setToggle('toggleDismissIdle', settings.dismissIdle);
   setToggle('toggleShowHud', settings.showHud);
+  setToggle('toggleStopWhenDone', settings.stopWhenDone);
+
+  const maxChaptersInput = document.getElementById('maxChaptersInput');
+  const maxMinutesInput = document.getElementById('maxMinutesInput');
+  if (maxChaptersInput) maxChaptersInput.value = String(Number(settings.maxChapters) || 0);
+  if (maxMinutesInput) maxMinutesInput.value = String(Number(settings.maxMinutes) || 0);
 
   document.getElementById('speedSlider').value = settings.playbackSpeed;
   document.getElementById('speedValue').textContent = settings.playbackSpeed + 'x';

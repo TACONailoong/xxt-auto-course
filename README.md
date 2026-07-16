@@ -21,6 +21,8 @@
 - **快捷键**：`Alt+Shift+S` 开关刷课，`Alt+Shift+H` 显示浮层
 - **设置导入导出**：JSON 备份与恢复
 - **页面轻提示**：开始/暂停、学完等关键节点轻量提示
+- **学完自动暂停**：目录无未完成小节时自动停止
+- **会话限流**：可限制本会话最多切章数 / 最大学习分钟数
 - **选项摘要**：折叠区显示当前开启能力；倍速过高有风险提示
 - **恢复默认**：一键还原设置；浮层双击标题可复位位置
 - **图标 badge**：运行中 `ON`，停止 `停`
@@ -61,6 +63,9 @@
 | 自动下一节 | 视频/任务完成后继续 | 开 |
 | 关闭防挂机提示 | 自动点继续学习 | 开 |
 | 显示页面浮层 | 右下角状态面板 | 开 |
+| 学完自动暂停 | 目录学完后自动停止 | 开 |
+| 本会话最多切章 | 达到后自动暂停；0 不限制 | 0 |
+| 本会话最多分钟 | 达到后自动暂停；0 不限制 | 0 |
 | 播放倍速 | 0.5x - 4x | 1.5x |
 
 ### 快捷键
@@ -88,6 +93,7 @@ npm install
 npm test          # 语法检查 + 单元测试 + Chromium e2e
 npm run test:unit # 仅单元测试
 npm run check     # 仅语法检查
+npm run pack      # 打包为 dist/xxt-auto-<version>.zip
 ```
 
 ```
@@ -99,6 +105,8 @@ npm run check     # 仅语法检查
 ├── shared/dom.js
 ├── icons/
 ├── scripts/generate_icons.py
+├── scripts/pack.sh
+├── CHANGELOG.md
 ├── tests/
 └── README.md
 ```
@@ -111,5 +119,5 @@ pip install pillow && python3 scripts/generate_icons.py
 
 ## 版本
 
-- 版本：1.8.0
+- 版本：1.9.0
 - 兼容：Chrome、Edge、Firefox 115+

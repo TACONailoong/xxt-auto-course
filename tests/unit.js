@@ -98,9 +98,60 @@ test('summarizeOptions', () => {
     skipQuiz: false,
     autoNext: true,
     dismissIdle: false,
-    showHud: true
+    showHud: true,
+    stopWhenDone: true,
+    maxChapters: 5,
+    maxMinutes: 30
   });
-  assert.deepStrictEqual(chips, ['答题', '静音', '自动下一节', '浮层']);
+  assert.deepStrictEqual(chips, [
+    '答题',
+    '静音',
+    '自动下一节',
+    '浮层',
+    '学完即停',
+    '限5节',
+    '限30分'
+  ]);
+});
+
+test('shouldStopByLimits 切章上限', () => {
+  const result = DOM.shouldStopByLimits(
+    { nextCount: 3, startedAt: Date.now() },
+    { maxChapters: 3, maxMinutes: 0 }
+  );
+  assert.strictEqual(result.stop, true);
+  assert.ok(result.reason.includes('切章上限'));
+});
+
+test('shouldStopByLimits 时长上限', () => {
+  const now = Date.now();
+  const result = DOM.shouldStopByLimits(
+    { nextCount: 0, startedAt: now - 10 * 60000 },
+    { maxChapters: 0, maxMinutes: 5 },
+    now
+  );
+  assert.strictEqual(result.stop, true);
+  assert.ok(result.reason.includes('时长上限'));
+});
+
+test('shouldStopByLimits 未超限', () => {
+  const now = Date.now();
+  const result = DOM.shouldStopByLimits(
+    { nextCount: 1, startedAt: now },
+    { maxChapters: 5, maxMinutes: 30 },
+    now
+  );
+  assert.strictEqual(result.stop, false);
+});
+
+test('trimSet 超限裁剪保留末尾', () => {
+  const trimmed = DOM.trimSet([1, 2, 3, 4, 5], 3);
+  assert.deepStrictEqual([...trimmed], [3, 4, 5]);
+});
+
+test('trimSet 未超限原样', () => {
+  const trimmed = DOM.trimSet(['a', 'b'], 5);
+  assert.deepStrictEqual([...trimmed], ['a', 'b']);
 });
 
 test('isHighSpeed', () => {

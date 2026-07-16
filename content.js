@@ -18,7 +18,10 @@
       skipQuiz: true,
       autoNext: true,
       dismissIdle: true,
-      showHud: true
+      showHud: true,
+      stopWhenDone: true,
+      maxChapters: 0,
+      maxMinutes: 0
     };
 
   const DOM = (typeof XXT_DOM !== 'undefined' && XXT_DOM) || {};
@@ -38,6 +41,10 @@
     DOM.createEmptyStats || (() => ({ nextCount: 0, answerCount: 0, startedAt: Date.now() }));
   const countRemainingCatalog = DOM.countRemainingCatalog || (() => 0);
   const fingerprintText = DOM.fingerprintText || (t => normalizeText(t).slice(0, 160));
+  const shouldStopByLimits = DOM.shouldStopByLimits || (() => ({ stop: false, reason: '' }));
+  const trimSet = DOM.trimSet || ((setLike) => new Set(setLike || []));
+  const FINGERPRINT_LIMIT =
+    (typeof XXT_FINGERPRINT_LIMIT !== 'undefined' && XXT_FINGERPRINT_LIMIT) || 80;
 
   const IS_TOP = window.top === window.self;
   const STATUS_KEY =
@@ -71,6 +78,8 @@
       this.hudDragBound = false;
       this.answeredFingerprints = new Set();
       this.toastTimer = null;
+      this.hadRemaining = false;
+      this.limitPausePending = false;
       this.status = {
         phase: 'idle',
         detail: '等待课程页面…',
@@ -293,6 +302,7 @@
         })
       );
       this.status.remaining = countRemainingCatalog(items);
+      if (this.status.remaining > 0) this.hadRemaining = true;
       return this.status.remaining;
     }
 
@@ -400,11 +410,46 @@
         if (IS_TOP) {
           this.publishStatus(true);
           this.updateHud();
+          if (key === 'nextCount') await this.enforceLimits();
         } else {
           window.parent.postMessage({ type: 'XXT_STATS_UPDATED' }, '*');
         }
       } catch (error) {
         this.markDead(error && error.message);
+      }
+    }
+
+    async pauseForReason(reason) {
+      if (!this.settings.isRunning || this.limitPausePending || !this.ensureAlive()) return;
+      this.limitPausePending = true;
+      try {
+        this.setStatus('limit', reason);
+        this.showToast(reason);
+        this.pushLog(reason);
+        await chrome.storage.sync.set({ isRunning: false });
+      } catch (error) {
+        this.markDead(error && error.message);
+      } finally {
+        setTimeout(() => {
+          this.limitPausePending = false;
+        }, 1500);
+      }
+    }
+
+    async enforceLimits() {
+      if (!IS_TOP || !this.settings.isRunning) return;
+      const limit = shouldStopByLimits(this.stats, this.settings);
+      if (limit.stop) {
+        await this.pauseForReason(limit.reason);
+        return true;
+      }
+      return false;
+    }
+
+    async enforceCompletionStop() {
+      if (!IS_TOP || !this.settings.isRunning || !this.settings.stopWhenDone) return;
+      if (this.hadRemaining && this.status.remaining === 0) {
+        await this.pauseForReason('目录已全部完成，已自动暂停');
       }
     }
 
@@ -853,6 +898,8 @@
       }
 
       if (IS_TOP) {
+        this.enforceLimits();
+        this.enforceCompletionStop();
         if (this.settings.dismissIdle) this.dismissIdleDialogs();
         this.handleTopFrameTasks();
         this.publishStatus(false);
@@ -1062,7 +1109,15 @@
         this.lastAnswerAt = Date.now();
         this.setStatus('answer', '已自动作答弹窗题');
         if (result.fresh) {
-          if (fp) this.answeredFingerprints.add(fp);
+          if (fp) {
+            this.answeredFingerprints.add(fp);
+            if (this.answeredFingerprints.size > FINGERPRINT_LIMIT) {
+              this.answeredFingerprints = trimSet(
+                this.answeredFingerprints,
+                Math.floor(FINGERPRINT_LIMIT / 2)
+              );
+            }
+          }
           this.bumpStat('answerCount');
         }
       }
@@ -1236,6 +1291,9 @@
       this.log('未找到下一章节入口，可能已学完');
       this.setStatus('done', '未找到下一节，可能已全部完成');
       this.showToast('没有更多未完成小节了');
+      if (this.settings.stopWhenDone) {
+        this.pauseForReason('目录已全部完成，已自动暂停');
+      }
       return false;
     }
 

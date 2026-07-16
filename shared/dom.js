@@ -95,7 +95,42 @@ function xxtSummarizeOptions(settings) {
   if (settings.autoNext) chips.push('自动下一节');
   if (settings.dismissIdle) chips.push('防挂机');
   if (settings.showHud) chips.push('浮层');
+  if (settings.stopWhenDone) chips.push('学完即停');
+  const maxChapters = Number(settings.maxChapters) || 0;
+  const maxMinutes = Number(settings.maxMinutes) || 0;
+  if (maxChapters > 0) chips.push(`限${maxChapters}节`);
+  if (maxMinutes > 0) chips.push(`限${maxMinutes}分`);
   return chips;
+}
+
+function xxtShouldStopByLimits(stats, settings, now = Date.now()) {
+  const maxChapters = Number(settings && settings.maxChapters) || 0;
+  const maxMinutes = Number(settings && settings.maxMinutes) || 0;
+  const nextCount = Number(stats && stats.nextCount) || 0;
+  const startedAt = Number(stats && stats.startedAt) || now;
+
+  if (maxChapters > 0 && nextCount >= maxChapters) {
+    return {
+      stop: true,
+      reason: `已达本会话切章上限（${maxChapters}）`
+    };
+  }
+  if (maxMinutes > 0) {
+    const elapsedMin = (now - startedAt) / 60000;
+    if (elapsedMin >= maxMinutes) {
+      return {
+        stop: true,
+        reason: `已达本会话时长上限（${maxMinutes}分钟）`
+      };
+    }
+  }
+  return { stop: false, reason: '' };
+}
+
+function xxtTrimSet(setLike, limit) {
+  const arr = [...(setLike || [])];
+  if (arr.length <= limit) return new Set(arr);
+  return new Set(arr.slice(arr.length - Math.max(1, limit)));
 }
 
 function xxtIsHighSpeed(speed) {
@@ -148,7 +183,9 @@ const XXT_DOM = {
   createEmptyStats: xxtCreateEmptyStats,
   countRemainingCatalog: xxtCountRemainingCatalog,
   fingerprintText: xxtFingerprintText,
-  pickSettings: xxtPickSettings
+  pickSettings: xxtPickSettings,
+  shouldStopByLimits: xxtShouldStopByLimits,
+  trimSet: xxtTrimSet
 };
 
 if (typeof globalThis !== 'undefined') {
@@ -170,7 +207,9 @@ if (typeof globalThis !== 'undefined') {
     xxtCreateEmptyStats,
     xxtCountRemainingCatalog,
     xxtFingerprintText,
-    xxtPickSettings
+    xxtPickSettings,
+    xxtShouldStopByLimits,
+    xxtTrimSet
   });
 }
 

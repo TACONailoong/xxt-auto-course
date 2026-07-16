@@ -1,5 +1,6 @@
 node_modules/
 tests/browsers/
 tests/fixtures/*.webm
+dist/
 .DS_Store
 *.log

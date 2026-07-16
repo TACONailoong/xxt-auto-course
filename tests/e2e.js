@@ -194,7 +194,27 @@ function sleep(ms) {
       );
 
       const chips = await popup.$eval('#optionChips', el => el.textContent);
-      check('折叠区显示选项摘要', chips.includes('静音') && chips.includes('答题'), chips);
+      check(
+        '折叠区显示选项摘要',
+        chips.includes('静音') && chips.includes('答题') && chips.includes('学完即停'),
+        chips
+      );
+
+      const stopWhenDoneExists = await popup
+        .$eval('#toggleStopWhenDone', el => !!el)
+        .catch(() => false);
+      check('弹窗提供学完自动暂停开关', stopWhenDoneExists);
+
+      const maxChaptersExists = await popup
+        .$eval('#maxChaptersInput', el => el.type === 'number')
+        .catch(() => false);
+      const maxMinutesExists = await popup
+        .$eval('#maxMinutesInput', el => el.type === 'number')
+        .catch(() => false);
+      check('弹窗提供会话限流输入', maxChaptersExists && maxMinutesExists);
+
+      const footerText = await popup.$eval('.footer', el => el.textContent);
+      check('弹窗版本为 1.9.0', footerText.includes('v1.9.0'), footerText);
 
       await popup.click('.preset-btn[data-speed="3"]');
       await sleep(200);

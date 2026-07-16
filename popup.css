@@ -263,6 +263,42 @@ body::before {
   line-height: 1.5;
 }
 
+.limit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 8px 0 4px;
+}
+
+.limit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.limit-field input {
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--ink);
+  background: #fff;
+}
+
+.limit-field input:focus {
+  outline: 2px solid rgba(31, 122, 102, 0.28);
+  outline-offset: 1px;
+}
+
+.limit-field em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--muted);
+}
+
 .progress {
   margin-top: 10px;
   height: 5px;
