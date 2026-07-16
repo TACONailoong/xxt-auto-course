@@ -10,9 +10,9 @@ from PIL import Image, ImageDraw
 SIZES = [16, 48, 128]
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "icons")
 
-# 与弹窗 UI 一致的渐变色
-COLOR_TOP = (102, 126, 234)   # #667eea
-COLOR_BOTTOM = (118, 75, 162)  # #764ba2
+# 与弹窗 UI 一致的青绿渐变
+COLOR_TOP = (47, 155, 130)    # #2f9b82
+COLOR_BOTTOM = (20, 86, 71)   # #145647
 
 
 def make_icon(size: int) -> Image.Image:

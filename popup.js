@@ -116,20 +116,20 @@ async function refreshLiveStatus() {
     const result = await chrome.storage.local.get(STATUS_KEY);
     const status = result[STATUS_KEY];
     if (!status || Date.now() - (status.updatedAt || 0) > 15000) {
-      liveDetail.textContent = '尚未检测到活跃课程页（打开学习通播放页后显示）';
-      liveChapter.textContent = '—';
+      liveChapter.textContent = '尚未连接课程页';
+      liveDetail.textContent = '打开学习通播放页后，这里会显示实时进度';
       liveProgress.style.width = '0%';
       return;
     }
     liveChapter.textContent = status.chapter || '未识别当前章节';
+    const pct = formatProgress(status.progress);
     const parts = [status.detail || '运行中'];
-    if (status.hasVideo) {
-      parts.push(`进度 ${formatProgress(status.progress)}%`);
-    }
+    if (status.hasVideo) parts.push(`${pct}%`);
     liveDetail.textContent = parts.join(' · ');
-    liveProgress.style.width = `${formatProgress(status.progress)}%`;
+    liveProgress.style.width = `${pct}%`;
   } catch (error) {
-    liveDetail.textContent = '状态读取失败';
+    liveChapter.textContent = '状态读取失败';
+    liveDetail.textContent = '请重新打开扩展弹窗试试';
   }
 }
 
@@ -176,10 +176,12 @@ function escapeHtml(str) {
 function updateUI() {
   const statusDot = document.getElementById('statusDot');
   const statusText = document.getElementById('statusText');
+  const hero = document.querySelector('.hero');
 
-  statusDot.classList.toggle('active', settings.isRunning);
+  if (statusDot) statusDot.classList.toggle('active', settings.isRunning);
   statusText.classList.toggle('active', settings.isRunning);
   statusText.textContent = settings.isRunning ? '插件运行中' : '插件已停止';
+  if (hero) hero.dataset.state = settings.isRunning ? 'running' : 'stopped';
 
   setToggle('toggleAuto', settings.isRunning);
   setToggle('toggleAnswer', settings.autoAnswer);

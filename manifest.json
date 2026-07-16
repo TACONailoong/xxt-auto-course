@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "学习通自动刷课助手",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "自动播放学习通视频课程，支持倍速、静音、弹窗答题、防挂机提示、跳过测验与自动切章",
   "permissions": [
     "storage"

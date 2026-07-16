@@ -3,139 +3,137 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>学习通自动刷课助手</title>
+  <title>学习通助手</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <div class="container">
-    <div class="header">
-      <h1>学习通自动刷课助手</h1>
-      <p>自动播放 · 倍速 · 答题 · 切章</p>
-      <div class="status-indicator">
-        <div class="status-dot" id="statusDot" aria-hidden="true"></div>
-        <span class="status-text" id="statusText">插件已停止</span>
-      </div>
-      <div class="live-status">
-        <div class="label">页面状态</div>
-        <div class="chapter" id="liveChapter">—</div>
-        <div class="value" id="liveDetail">尚未检测到课程页，请打开学习通课程后查看</div>
-        <div class="progress" aria-hidden="true"><span id="liveProgress"></span></div>
-      </div>
-    </div>
-
-    <div class="control-group">
-      <div class="control-label">
-        <div class="text">
-          <span class="title">开启自动刷课</span>
-          <span class="desc">播放、续播、切章总开关</span>
-        </div>
-        <div class="toggle-switch" id="toggleAuto" role="switch" tabindex="0" aria-checked="false" aria-label="开启自动刷课"></div>
-      </div>
-    </div>
-
-    <div class="control-group">
-      <div class="control-label">
-        <div class="text">
-          <span class="title">自动答题</span>
-          <span class="desc">视频弹窗题随机作答</span>
-        </div>
-        <div class="toggle-switch" id="toggleAnswer" role="switch" tabindex="0" aria-checked="false" aria-label="自动答题"></div>
-      </div>
-    </div>
-
-    <div class="control-group">
-      <div class="control-label">
-        <div class="text">
-          <span class="title">静音播放</span>
-          <span class="desc">提高自动播放成功率</span>
-        </div>
-        <div class="toggle-switch" id="toggleMute" role="switch" tabindex="0" aria-checked="false" aria-label="静音播放"></div>
-      </div>
-    </div>
-
-    <div class="control-group">
-      <div class="control-label">
-        <div class="text">
-          <span class="title">跳过章节测验</span>
-          <span class="desc">遇到测验页自动进下一节</span>
-        </div>
-        <div class="toggle-switch" id="toggleSkipQuiz" role="switch" tabindex="0" aria-checked="false" aria-label="跳过章节测验"></div>
-      </div>
-    </div>
-
-    <div class="control-group">
-      <div class="control-label">
-        <div class="text">
-          <span class="title">自动下一节</span>
-          <span class="desc">视频/任务完成后继续</span>
-        </div>
-        <div class="toggle-switch" id="toggleAutoNext" role="switch" tabindex="0" aria-checked="false" aria-label="自动下一节"></div>
-      </div>
-    </div>
-
-    <div class="control-group">
-      <div class="control-label">
-        <div class="text">
-          <span class="title">关闭防挂机提示</span>
-          <span class="desc">自动点“继续学习/我知道了”</span>
-        </div>
-        <div class="toggle-switch" id="toggleDismissIdle" role="switch" tabindex="0" aria-checked="false" aria-label="关闭防挂机提示"></div>
-      </div>
-    </div>
-
-    <div class="control-group">
-      <div class="control-label">
-        <div class="text">
-          <span class="title">显示页面浮层</span>
-          <span class="desc">课程页右下角状态面板</span>
-        </div>
-        <div class="toggle-switch" id="toggleShowHud" role="switch" tabindex="0" aria-checked="false" aria-label="显示页面浮层"></div>
-      </div>
-    </div>
-
-    <div class="divider"></div>
-
-    <div class="control-group">
-      <div class="control-label">
-        <div class="text">
-          <span class="title">播放倍速</span>
+  <main class="app">
+    <header class="hero">
+      <div class="brand">
+        <img class="brand-mark" src="icons/icon48.png" alt="" width="36" height="36">
+        <div class="brand-text">
+          <h1>学习通助手</h1>
+          <p>自动播放 · 倍速 · 切章</p>
         </div>
       </div>
-      <div class="speed-control">
-        <div class="speed-value" id="speedValue">1.5x</div>
-        <input type="range" class="speed-slider" id="speedSlider" min="0.5" max="4" step="0.25" value="1.5" aria-label="播放倍速">
-        <div class="speed-presets">
-          <button class="preset-btn" type="button" data-speed="1">1x</button>
-          <button class="preset-btn" type="button" data-speed="1.5">1.5x</button>
-          <button class="preset-btn" type="button" data-speed="2">2x</button>
-          <button class="preset-btn" type="button" data-speed="3">3x</button>
+      <div class="run-row">
+        <div class="run-copy">
+          <span class="run-label" id="statusText">已停止</span>
+          <span class="run-hint">总开关</span>
+        </div>
+        <div
+          class="toggle-switch toggle-lg"
+          id="toggleAuto"
+          role="switch"
+          tabindex="0"
+          aria-checked="false"
+          aria-label="开启自动刷课"
+        ></div>
+      </div>
+    </header>
+
+    <section class="now" aria-label="当前状态">
+      <div class="now-top">
+        <span class="now-kicker">正在学习</span>
+        <span class="now-meta" id="speedValue">1.5x</span>
+      </div>
+      <h2 class="now-chapter" id="liveChapter">尚未连接课程页</h2>
+      <p class="now-detail" id="liveDetail">打开学习通播放页后，这里会显示实时进度</p>
+      <div class="progress" aria-hidden="true">
+        <span id="liveProgress"></span>
+      </div>
+    </section>
+
+    <section class="speed" aria-label="播放倍速">
+      <div class="section-head">
+        <h3>播放倍速</h3>
+        <span class="section-note">建议 1.5x – 2x</span>
+      </div>
+      <input
+        type="range"
+        class="speed-slider"
+        id="speedSlider"
+        min="0.5"
+        max="4"
+        step="0.25"
+        value="1.5"
+        aria-label="播放倍速"
+      >
+      <div class="speed-presets">
+        <button class="preset-btn" type="button" data-speed="1">1x</button>
+        <button class="preset-btn" type="button" data-speed="1.5">1.5x</button>
+        <button class="preset-btn" type="button" data-speed="2">2x</button>
+        <button class="preset-btn" type="button" data-speed="3">3x</button>
+      </div>
+    </section>
+
+    <details class="more" id="moreSettings">
+      <summary>
+        <span>更多选项</span>
+        <span class="chevron" aria-hidden="true"></span>
+      </summary>
+      <div class="more-body">
+        <div class="control-row">
+          <div class="text">
+            <span class="title">自动答题</span>
+            <span class="desc">视频弹窗题随机作答</span>
+          </div>
+          <div class="toggle-switch" id="toggleAnswer" role="switch" tabindex="0" aria-checked="false" aria-label="自动答题"></div>
+        </div>
+        <div class="control-row">
+          <div class="text">
+            <span class="title">静音播放</span>
+            <span class="desc">提高自动播放成功率</span>
+          </div>
+          <div class="toggle-switch" id="toggleMute" role="switch" tabindex="0" aria-checked="false" aria-label="静音播放"></div>
+        </div>
+        <div class="control-row">
+          <div class="text">
+            <span class="title">跳过章节测验</span>
+            <span class="desc">测验页自动进入下一节</span>
+          </div>
+          <div class="toggle-switch" id="toggleSkipQuiz" role="switch" tabindex="0" aria-checked="false" aria-label="跳过章节测验"></div>
+        </div>
+        <div class="control-row">
+          <div class="text">
+            <span class="title">自动下一节</span>
+            <span class="desc">视频或任务完成后继续</span>
+          </div>
+          <div class="toggle-switch" id="toggleAutoNext" role="switch" tabindex="0" aria-checked="false" aria-label="自动下一节"></div>
+        </div>
+        <div class="control-row">
+          <div class="text">
+            <span class="title">关闭防挂机提示</span>
+            <span class="desc">自动点“继续学习”</span>
+          </div>
+          <div class="toggle-switch" id="toggleDismissIdle" role="switch" tabindex="0" aria-checked="false" aria-label="关闭防挂机提示"></div>
+        </div>
+        <div class="control-row">
+          <div class="text">
+            <span class="title">显示页面浮层</span>
+            <span class="desc">课程页右下角状态面板</span>
+          </div>
+          <div class="toggle-switch" id="toggleShowHud" role="switch" tabindex="0" aria-checked="false" aria-label="显示页面浮层"></div>
         </div>
       </div>
-    </div>
+    </details>
 
-    <div class="divider"></div>
-
-    <div class="log-header">
-      <h3>最近活动</h3>
-      <button class="log-clear" id="clearLogBtn" type="button">清空</button>
-    </div>
-    <ul class="log-list" id="logList">
-      <li class="empty">暂无活动记录</li>
-    </ul>
-
-    <div class="tips">
-      <h3>使用提示</h3>
-      <ul>
-        <li>打开学习通课程播放页即可自动工作</li>
-        <li>设置修改后立即生效，无需点保存</li>
-        <li>浮层可暂停/隐藏；图标 badge 显示运行状态</li>
-        <li>自动答题为随机选择，重要题请手动作答</li>
+    <section class="activity" aria-label="最近活动">
+      <div class="section-head">
+        <h3>最近活动</h3>
+        <button class="ghost-btn" id="clearLogBtn" type="button">清空</button>
+      </div>
+      <ul class="log-list" id="logList">
+        <li class="empty">暂无活动记录</li>
       </ul>
-    </div>
+    </section>
 
-    <div class="save-hint" id="saveHint">已自动保存</div>
-    <div class="footer">版本 1.4.0 · 仅供学习交流使用</div>
-  </div>
+    <p class="save-hint" id="saveHint" role="status">已自动保存</p>
+    <footer class="footer">v1.5.0 · 仅供学习交流</footer>
+  </main>
+
+  <!-- 兼容旧测试选择器 -->
+  <div id="statusDot" class="sr-only" aria-hidden="true"></div>
 
   <script src="shared/defaults.js"></script>
   <script src="shared/dom.js"></script>

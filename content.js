@@ -248,34 +248,36 @@
         right: '16px',
         bottom: '16px',
         zIndex: '2147483646',
-        fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+        fontFamily:
+          '"Source Han Serif SC","Noto Serif CJK SC","Songti SC","PingFang SC",serif',
         fontSize: '12px',
-        color: '#fff',
-        background: 'rgba(15, 23, 42, 0.92)',
-        borderRadius: '12px',
+        color: '#f4fbf8',
+        background: 'linear-gradient(145deg, rgba(20,86,71,0.94), rgba(31,122,102,0.90))',
+        border: '1px solid rgba(255,255,255,0.14)',
+        borderRadius: '14px',
         padding: '12px 14px',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
-        backdropFilter: 'blur(8px)',
-        minWidth: '220px',
-        maxWidth: '280px',
+        boxShadow: '0 10px 28px rgba(20,35,31,0.28)',
+        backdropFilter: 'blur(10px)',
+        minWidth: '228px',
+        maxWidth: '290px',
         pointerEvents: 'auto',
-        transition: 'opacity 0.2s ease',
+        transition: 'opacity 0.2s ease, transform 0.2s ease',
         userSelect: 'none'
       });
       root.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
-          <div style="font-weight:600;">学习通助手</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+          <div style="font-weight:700;font-size:14px;letter-spacing:0.3px;">学习通助手</div>
           <div style="display:flex;gap:6px;">
-            <button data-role="toggle" type="button" style="border:none;border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer;background:#334155;color:#fff;">暂停</button>
-            <button data-role="hide" type="button" style="border:none;border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer;background:#334155;color:#fff;">隐藏</button>
+            <button data-role="toggle" type="button" style="border:1px solid rgba(255,255,255,0.22);border-radius:7px;padding:4px 9px;font-size:11px;cursor:pointer;background:rgba(255,255,255,0.12);color:#fff;font-family:inherit;">暂停</button>
+            <button data-role="hide" type="button" style="border:1px solid rgba(255,255,255,0.22);border-radius:7px;padding:4px 9px;font-size:11px;cursor:pointer;background:rgba(255,255,255,0.12);color:#fff;font-family:inherit;">隐藏</button>
           </div>
         </div>
-        <div data-role="chapter" style="opacity:0.75;font-size:11px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
-        <div data-role="detail" style="opacity:0.95;line-height:1.4;">初始化中…</div>
-        <div data-role="bar" style="margin-top:8px;height:4px;background:rgba(255,255,255,0.15);border-radius:999px;overflow:hidden;">
-          <div data-role="bar-fill" style="height:100%;width:0%;background:#34d399;transition:width 0.25s ease;"></div>
+        <div data-role="chapter" style="opacity:0.78;font-size:11px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+        <div data-role="detail" style="opacity:0.96;line-height:1.4;font-family:'Avenir Next','PingFang SC',sans-serif;">初始化中…</div>
+        <div data-role="bar" style="margin-top:9px;height:4px;background:rgba(255,255,255,0.18);border-radius:2px;overflow:hidden;">
+          <div data-role="bar-fill" style="height:100%;width:0%;background:#7dd3b5;transition:width 0.25s ease;"></div>
         </div>
-        <div data-role="meta" style="margin-top:6px;opacity:0.7;"></div>
+        <div data-role="meta" style="margin-top:6px;opacity:0.72;font-family:'Avenir Next','PingFang SC',sans-serif;"></div>
       `;
 
       root.querySelector('[data-role="toggle"]').addEventListener('click', async e => {
