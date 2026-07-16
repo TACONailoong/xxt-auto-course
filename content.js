@@ -1,6 +1,6 @@
 // 学习通自动刷课插件 - 内容脚本
 // 通过 manifest 的 all_frames 注入到每一个 frame。
-// 顶层页面负责：状态浮层、目录切换、步骤页签、测验跳过。
+// 顶层页面负责：状态浮层、目录切换、步骤页签、测验跳过、防挂机弹窗。
 // 内层 frame 负责：视频接管、答题、文档滚动。
 
 (() => {
@@ -17,11 +17,16 @@
       autoAnswer: true,
       mute: true,
       skipQuiz: true,
-      autoNext: true
+      autoNext: true,
+      dismissIdle: true,
+      showHud: true
     };
 
   const IS_TOP = window.top === window.self;
-  const STATUS_KEY = 'xxtRuntimeStatus';
+  const STATUS_KEY =
+    (typeof XXT_STATUS_KEY !== 'undefined' && XXT_STATUS_KEY) || 'xxtRuntimeStatus';
+  const LOG_KEY = (typeof XXT_LOG_KEY !== 'undefined' && XXT_LOG_KEY) || 'xxtActivityLog';
+  const LOG_LIMIT = (typeof XXT_LOG_LIMIT !== 'undefined' && XXT_LOG_LIMIT) || 40;
 
   class XueXiTongAutoPlayer {
     constructor() {
@@ -32,6 +37,7 @@
       this.lastAnswerAt = 0;
       this.lastNextAt = 0;
       this.lastDocScrollAt = 0;
+      this.lastIdleDismissAt = 0;
       this.nextPending = false;
       this.stallLastTime = 0;
       this.stallLastWall = 0;
@@ -54,12 +60,17 @@
       if (IS_TOP) {
         this.ensureHud();
         this.publishStatus();
+        this.pushLog('插件已在本页启动');
       }
       this.log('插件已启动', { frame: IS_TOP ? 'top' : 'iframe', ...this.settings });
     }
 
     log(...args) {
       console.log('[学习通助手]', ...args);
+    }
+
+    randomDelay(minMs, maxMs) {
+      return minMs + Math.floor(Math.random() * (maxMs - minMs + 1));
     }
 
     async loadSettings() {
@@ -78,7 +89,10 @@
           if (changes[key]) this.settings[key] = changes[key].newValue;
         }
         this.applySettings();
-        if (IS_TOP) this.updateHud();
+        if (IS_TOP) {
+          this.ensureHud();
+          this.updateHud();
+        }
       });
     }
 
@@ -96,6 +110,7 @@
     }
 
     setStatus(phase, detail, extra = {}) {
+      const prevDetail = this.status.detail;
       this.status = {
         ...this.status,
         phase,
@@ -106,6 +121,7 @@
       if (IS_TOP) {
         this.updateHud();
         this.publishStatus();
+        if (detail && detail !== prevDetail) this.pushLog(detail);
       }
     }
 
@@ -121,15 +137,44 @@
             }
           }
         });
+        chrome.runtime
+          .sendMessage({
+            type: 'STATUS_UPDATE',
+            isRunning: this.settings.isRunning,
+            phase: this.status.phase,
+            detail: this.status.detail
+          })
+          .catch(() => {});
       } catch (_) {
         // 扩展上下文失效时忽略
       }
     }
 
+    async pushLog(message) {
+      if (!IS_TOP || !message) return;
+      try {
+        const result = await chrome.storage.local.get(LOG_KEY);
+        const list = Array.isArray(result[LOG_KEY]) ? result[LOG_KEY] : [];
+        list.unshift({ t: Date.now(), message: String(message) });
+        await chrome.storage.local.set({ [LOG_KEY]: list.slice(0, LOG_LIMIT) });
+      } catch (_) {}
+    }
+
     // ---------- 页面状态浮层（仅顶层） ----------
 
     ensureHud() {
-      if (!IS_TOP || this.hud || !document.documentElement) return;
+      if (!IS_TOP || !document.documentElement) return;
+
+      if (!this.settings.showHud) {
+        if (this.hud) {
+          this.hud.remove();
+          this.hud = null;
+        }
+        return;
+      }
+
+      if (this.hud) return;
+
       const root = document.createElement('div');
       root.id = 'xxt-assistant-hud';
       Object.assign(root.style, {
@@ -140,33 +185,65 @@
         fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
         fontSize: '12px',
         color: '#fff',
-        background: 'rgba(26, 26, 46, 0.88)',
+        background: 'rgba(26, 26, 46, 0.92)',
         borderRadius: '12px',
-        padding: '10px 14px',
+        padding: '12px 14px',
         boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
         backdropFilter: 'blur(8px)',
-        minWidth: '180px',
-        pointerEvents: 'none',
-        transition: 'opacity 0.2s ease'
+        minWidth: '200px',
+        pointerEvents: 'auto',
+        transition: 'opacity 0.2s ease',
+        userSelect: 'none'
       });
       root.innerHTML = `
-        <div style="font-weight:600;margin-bottom:4px;">学习通助手</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
+          <div style="font-weight:600;">学习通助手</div>
+          <div style="display:flex;gap:6px;">
+            <button data-role="toggle" type="button" style="border:none;border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer;background:#334155;color:#fff;">暂停</button>
+            <button data-role="hide" type="button" style="border:none;border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer;background:#334155;color:#fff;">隐藏</button>
+          </div>
+        </div>
         <div data-role="detail" style="opacity:0.9;line-height:1.4;">初始化中…</div>
         <div data-role="meta" style="margin-top:6px;opacity:0.7;"></div>
       `;
+
+      root.querySelector('[data-role="toggle"]').addEventListener('click', async e => {
+        e.stopPropagation();
+        try {
+          await chrome.storage.sync.set({ isRunning: !this.settings.isRunning });
+        } catch (_) {}
+      });
+      root.querySelector('[data-role="hide"]').addEventListener('click', async e => {
+        e.stopPropagation();
+        try {
+          await chrome.storage.sync.set({ showHud: false });
+        } catch (_) {}
+      });
+
       document.documentElement.appendChild(root);
       this.hud = root;
       this.updateHud();
     }
 
     updateHud() {
+      if (!this.settings.showHud) {
+        if (this.hud) {
+          this.hud.remove();
+          this.hud = null;
+        }
+        return;
+      }
       if (!this.hud) return;
+
       const detail = this.hud.querySelector('[data-role="detail"]');
       const meta = this.hud.querySelector('[data-role="meta"]');
+      const toggle = this.hud.querySelector('[data-role="toggle"]');
+
+      toggle.textContent = this.settings.isRunning ? '暂停' : '开始';
       if (!this.settings.isRunning) {
         detail.textContent = '已停止';
-        meta.textContent = '在扩展弹窗中重新开启';
-        this.hud.style.opacity = '0.55';
+        meta.textContent = '点击“开始”或在扩展弹窗中开启';
+        this.hud.style.opacity = '0.7';
         return;
       }
       this.hud.style.opacity = '1';
@@ -237,7 +314,10 @@
         this.log('视频播放完成');
         this.setStatus('next', '视频结束，准备下一节', { hasVideo: true, progress: 1 });
         if (this.settings.isRunning && this.settings.autoNext) {
-          setTimeout(() => this.requestNextChapter('video-ended'), 1500);
+          setTimeout(
+            () => this.requestNextChapter('video-ended'),
+            this.randomDelay(1200, 2200)
+          );
         }
       });
 
@@ -283,12 +363,17 @@
     // ---------- 主循环 ----------
 
     tick() {
+      // 浮层始终可更新；停止时仍允许通过浮层重新开启
+      if (IS_TOP) {
+        this.ensureHud();
+        this.updateHud();
+      }
+
       if (!this.settings.isRunning) return;
 
       if (IS_TOP) {
-        this.ensureHud();
+        if (this.settings.dismissIdle) this.dismissIdleDialogs();
         this.handleTopFrameTasks();
-        // 顶层定期刷新状态给 popup
         if (Date.now() - this.status.updatedAt > 2000) this.publishStatus();
       }
 
@@ -296,14 +381,9 @@
       this.clickPlayOverlay();
 
       const video = this.findVideo();
-      if (video) {
-        this.guardVideo(video);
-      }
+      if (video) this.guardVideo(video);
 
-      if (this.settings.autoAnswer) {
-        this.checkAndAnswerQuestion();
-      }
-
+      if (this.settings.autoAnswer) this.checkAndAnswerQuestion();
       this.handleDocumentReading();
       this.dismissJobFinishTip();
     }
@@ -318,7 +398,6 @@
         this.tryPlay(video);
       }
 
-      // 卡顿检测：播放中进度长时间不动则尝试恢复
       if (!video.paused && !video.ended) {
         const now = Date.now();
         const t = video.currentTime || 0;
@@ -340,17 +419,14 @@
     }
 
     handleTopFrameTasks() {
-      // 1. 若停在"学习目标"等非视频步骤，切到视频页签
       if (this.switchToVideoTab()) return;
 
-      // 2. 章节测验：按设置跳过
       if (this.settings.skipQuiz && this.isChapterTest()) {
         this.setStatus('skip', '跳过章节测验');
         this.requestNextChapter('chapter-test');
         return;
       }
 
-      // 3. 当前任务点已完成则进入下一节
       if (this.settings.autoNext && this.isCurrentJobFinished()) {
         this.setStatus('next', '任务点已完成，切换下一节');
         this.requestNextChapter('job-finished');
@@ -386,14 +462,12 @@
     }
 
     isCurrentJobFinished() {
-      // 目录中当前激活项显示"已完成"
       const active = document.querySelector('.posCatalog_active');
       if (active) {
         const tip = active.querySelector('.prevHoverTips');
         const text = (tip && tip.textContent) || '';
         if (text.includes('已完成')) return true;
       }
-      // 仅当页面明确存在任务点图标，且全部带有完成标记时才判定完成
       const jobIcons = document.querySelectorAll('.ans-job-icon');
       if (jobIcons.length === 0) return false;
       const unfinished = document.querySelectorAll(
@@ -402,8 +476,58 @@
       return unfinished.length === 0;
     }
 
+    // ---------- 防挂机 / 提示弹窗 ----------
+
+    dismissIdleDialogs() {
+      if (Date.now() - this.lastIdleDismissAt < 2500) return false;
+
+      const keywords = ['继续学习', '我知道了', '知道了', '继续', '关闭'];
+      const roots = document.querySelectorAll(
+        '.maskDiv, .popDiv, .dialog-mask, .el-message-box, .el-dialog, .ant-modal, .layui-layer'
+      );
+
+      const clickIfMatch = (root) => {
+        const buttons = root.querySelectorAll('a, button, .jb_btn, .btn, span, div');
+        for (const btn of buttons) {
+          if (!this.isVisible(btn)) continue;
+          const text = (btn.textContent || '').replace(/\s+/g, '');
+          if (!text || text.length > 12) continue;
+          if (keywords.some(k => text === k || text.includes(k))) {
+            // 避免误点目录/导航里的“下一节”
+            if (btn.closest('#coursetree, .posCatalog_select')) continue;
+            this.safeClick(btn);
+            this.lastIdleDismissAt = Date.now();
+            this.log('已关闭提示弹窗:', text);
+            this.setStatus('dialog', `已关闭提示：${text}`);
+            return true;
+          }
+        }
+        return false;
+      };
+
+      for (const root of roots) {
+        if (!this.isVisible(root) && !root.classList.contains('maskDiv')) continue;
+        // maskDiv 有时 opacity/尺寸特殊，只要包含关键词按钮就点
+        if (clickIfMatch(root)) return true;
+      }
+
+      // 兜底：全局找“继续学习”
+      for (const btn of document.querySelectorAll('a, button, .jb_btn')) {
+        const text = (btn.textContent || '').replace(/\s+/g, '');
+        if ((text === '继续学习' || text === '我知道了') && this.isVisible(btn)) {
+          this.safeClick(btn);
+          this.lastIdleDismissAt = Date.now();
+          this.setStatus('dialog', `已关闭提示：${text}`);
+          return true;
+        }
+      }
+      return false;
+    }
+
     dismissJobFinishTip() {
-      const tipNext = document.querySelector('.jb_btn.jb_btn_92.fr.fs14.nextChapter, .nextChapter');
+      const tipNext = document.querySelector(
+        '.jb_btn.jb_btn_92.fr.fs14.nextChapter, .maskDiv .nextChapter, .nextChapter'
+      );
       if (tipNext && this.isVisible(tipNext)) {
         this.log('点击完成提示中的下一章按钮');
         this.safeClick(tipNext);
@@ -415,7 +539,6 @@
     // ---------- 文档阅读 ----------
 
     handleDocumentReading() {
-      // 学习通文档/PDF 任务：滚动到底以完成阅读进度
       const boxes = document.querySelectorAll('.fileBox, .imgLook, .doc-reader, #img');
       if (!boxes.length) return;
       if (Date.now() - this.lastDocScrollAt < 2000) return;
@@ -468,7 +591,9 @@
         for (const el of document.querySelectorAll(selector)) {
           if (
             this.isVisible(el) &&
-            el.querySelector('input[type="radio"], input[type="checkbox"], .ans-videoquiz-opt')
+            el.querySelector(
+              'input[type="radio"], input[type="checkbox"], .ans-videoquiz-opt'
+            )
           ) {
             return el;
           }
@@ -494,7 +619,9 @@
     safeClick(el) {
       if (!el) return;
       try {
-        el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        el.dispatchEvent(
+          new MouseEvent('click', { bubbles: true, cancelable: true, view: window })
+        );
         if (typeof el.click === 'function') el.click();
       } catch (_) {
         try {
@@ -505,7 +632,6 @@
 
     answerQuestion(container) {
       try {
-        // 学习通选项有时不是 input，而是可点击的 div/li
         const optionNodes = [
           ...container.querySelectorAll(
             'input[type="radio"], input[type="checkbox"], .ans-videoquiz-opt, .answerOption, li.option'
@@ -519,7 +645,9 @@
           el => el.matches && el.matches('input[type="checkbox"]')
         );
         const customOpts = optionNodes.filter(
-          el => !el.matches || (!el.matches('input[type="radio"]') && !el.matches('input[type="checkbox"]'))
+          el =>
+            !el.matches ||
+            (!el.matches('input[type="radio"]') && !el.matches('input[type="checkbox"]'))
         );
 
         let selected = false;
@@ -547,7 +675,10 @@
         }
 
         if (!selected) return false;
-        setTimeout(() => this.clickSubmitButton(container), 600);
+        setTimeout(
+          () => this.clickSubmitButton(container),
+          this.randomDelay(500, 900)
+        );
         return true;
       } catch (error) {
         this.log('自动答题失败:', error);
@@ -560,12 +691,9 @@
       const candidates = [
         ...container.querySelectorAll(
           'a, button, input[type="button"], input[type="submit"], .btnSubmit, .ans-videoquiz-submit'
-        )
-      ];
-      // 也在整个 document 里找（有的按钮在弹窗外层）
-      candidates.push(
+        ),
         ...document.querySelectorAll('.ans-videoquiz-submit, .btnSubmit, .popBtn')
-      );
+      ];
 
       for (const btn of candidates) {
         const text = (btn.textContent || btn.value || '').trim();
@@ -586,28 +714,33 @@
       this.lastNextAt = Date.now();
       this.log('请求切换下一章:', reason);
 
-      if (IS_TOP) {
-        this.goToNextChapter();
-        setTimeout(() => {
-          this.nextPending = false;
-        }, 4000);
-      } else {
-        try {
-          window.parent.postMessage({ type: 'XXT_GO_NEXT_CHAPTER', reason }, '*');
-        } catch (error) {
-          this.log('通知顶层切换失败:', error);
+      const run = () => {
+        if (IS_TOP) {
+          this.goToNextChapter(reason);
+        } else {
+          try {
+            window.parent.postMessage({ type: 'XXT_GO_NEXT_CHAPTER', reason }, '*');
+          } catch (error) {
+            this.log('通知顶层切换失败:', error);
+          }
         }
         setTimeout(() => {
           this.nextPending = false;
         }, 4000);
-      }
+      };
+
+      // 轻微随机延迟，避免节奏过于机械
+      setTimeout(run, this.randomDelay(200, 800));
     }
 
-    goToNextChapter() {
-      // 优先处理完成提示弹窗
+    goToNextChapter(reason = '') {
       if (this.dismissJobFinishTip()) return;
 
-      // 1. 官方"下一节"按钮
+      // 视频结束/任务完成：优先走目录树（更稳定）；测验页优先点官方下一节
+      if (reason !== 'chapter-test') {
+        if (this.clickNextCatalogItem()) return;
+      }
+
       const nextSelectors = [
         '#prevNextFocusNext',
         '#right1',
@@ -629,8 +762,7 @@
         }
       }
 
-      // 2. 从课程目录树点击下一个未完成节点
-      if (this.clickNextCatalogItem()) return;
+      if (reason === 'chapter-test' && this.clickNextCatalogItem()) return;
 
       this.log('未找到下一章节入口，可能已学完');
       this.setStatus('done', '未找到下一节，可能已全部完成');
@@ -648,7 +780,6 @@
 
       for (let i = activeIndex + 1; i < items.length; i++) {
         const item = items[i];
-        // 跳过已完成（若 tip 明确写了已完成）
         const tip = item.querySelector('.prevHoverTips');
         const tipText = (tip && tip.textContent) || '';
         if (tipText.includes('已完成')) continue;

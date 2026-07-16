@@ -1,14 +1,7 @@
 /**
  * 端到端测试：用 Chromium 加载扩展，验证核心能力。
  *
- * 依赖：
- *   npm install puppeteer-core
- *   npx @puppeteer/browsers install chromium@latest --path ./browsers
- *   ffmpeg -y -f lavfi -i testsrc=duration=30:size=320x240:rate=10 -c:v libvpx -an tests/fixtures/test.webm
- *
- * 用法：
- *   node tests/mock-server.js &
- *   CHROME_PATH=... node tests/e2e.js
+ * 用法：npm test
  */
 
 const puppeteer = require('puppeteer-core');
@@ -30,6 +23,10 @@ function findChromium() {
     if (fs.existsSync(candidate)) return candidate;
   }
   return null;
+}
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
 }
 
 (async () => {
@@ -74,9 +71,13 @@ function findChromium() {
     check('检测到 iframe 内视频', logs.some(l => l.includes('检测到视频')));
     check('自动切换到视频页签', logs.some(l => l.includes('切换到视频页签')));
 
-    // 顶层浮层存在
     const hudExists = await page.$eval('#xxt-assistant-hud', el => !!el).catch(() => false);
     check('页面状态浮层已显示', hudExists);
+
+    const hudHasToggle = await page
+      .$eval('#xxt-assistant-hud [data-role="toggle"]', el => !!el)
+      .catch(() => false);
+    check('浮层包含暂停按钮', hudHasToggle);
 
     let videoState = null;
     for (const f of page.frames()) {
@@ -96,6 +97,12 @@ function findChromium() {
     check('视频已自动播放', videoState && videoState.paused === false, JSON.stringify(videoState));
     check('默认静音播放', videoState && videoState.muted === true, JSON.stringify(videoState));
 
+    // 防挂机弹窗
+    await page.evaluate(() => window.__showIdle());
+    await sleep(3500);
+    const idleDismissed = await page.evaluate(() => window.__idleDismissed === true);
+    check('防挂机弹窗已自动关闭', idleDismissed);
+
     // 答题弹窗
     for (const f of page.frames()) {
       const shown = await f
@@ -112,6 +119,16 @@ function findChromium() {
     await sleep(4000);
     check('自动答题触发', logs.some(l => l.includes('自动答题')));
 
+    // 任务完成后走目录切章（跳过已完成项）
+    await page.evaluate(() => window.__markFinished());
+    await sleep(5500);
+    const catalogTarget = await page.evaluate(() => window.__catalogClicked);
+    check(
+      '任务完成后从目录切到下一未完成节',
+      catalogTarget === '1.2 第二课',
+      `clicked=${catalogTarget}`
+    );
+
     if (extId) {
       const popup = await browser.newPage();
       const popupErrors = [];
@@ -125,6 +142,9 @@ function findChromium() {
 
       const statusText = await popup.$eval('#statusText', el => el.textContent);
       check('弹窗显示运行中', statusText === '插件运行中', statusText);
+
+      const logText = await popup.$eval('#logList', el => el.textContent);
+      check('弹窗显示活动日志', logText && !logText.includes('暂无活动记录'), logText.slice(0, 80));
 
       // 即时保存：改倍速无需点保存按钮
       await popup.click('.preset-btn[data-speed="2"]');
@@ -140,7 +160,22 @@ function findChromium() {
           .catch(() => null);
         if (newRate !== null) break;
       }
-      check('即时保存后倍速变为 2x', newRate !== null && Math.abs(newRate - 2) < 0.01, `rate=${newRate}`);
+      check(
+        '即时保存后倍速变为 2x',
+        newRate !== null && Math.abs(newRate - 2) < 0.01,
+        `rate=${newRate}`
+      );
+
+      // badge：通过 service worker 执行查询
+      const worker = swTarget.worker ? await swTarget.worker() : null;
+      if (worker) {
+        const badge = await worker.evaluate(async () => {
+          return await chrome.action.getBadgeText({});
+        });
+        check('扩展图标 badge 为 ON', badge === 'ON', `badge=${badge}`);
+      } else {
+        check('扩展图标 badge 为 ON', false, '无法访问 service worker');
+      }
     }
 
     // 测验页跳过
@@ -153,7 +188,11 @@ function findChromium() {
     });
     await sleep(4000);
     const nextClicks = await quizPage.evaluate(() => window.__nextClicks || 0);
-    check('章节测验自动跳过', nextClicks > 0 || quizLogs.some(l => l.includes('跳过章节测验')), `clicks=${nextClicks}`);
+    check(
+      '章节测验自动跳过',
+      nextClicks > 0 || quizLogs.some(l => l.includes('跳过章节测验')),
+      `clicks=${nextClicks}`
+    );
   } catch (error) {
     console.error('测试执行出错:', error);
     failures.push('执行异常');
@@ -164,7 +203,3 @@ function findChromium() {
   console.log(failures.length === 0 ? '\n全部通过' : `\n失败项: ${failures.join(', ')}`);
   process.exit(failures.length === 0 ? 0 : 1);
 })();
-
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}

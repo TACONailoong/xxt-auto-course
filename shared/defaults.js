@@ -1,5 +1,5 @@
-// 共享默认配置（popup 与 content script 共用）
-// 注意：通过 manifest content_scripts / popup.html 分别加载，不依赖打包工具。
+// 共享默认配置（popup / content script / background 共用）
+// 通过 manifest / importScripts / script 标签加载，不依赖打包工具。
 
 const XXT_DEFAULT_SETTINGS = {
   isRunning: true,
@@ -7,10 +7,18 @@ const XXT_DEFAULT_SETTINGS = {
   autoAnswer: true,
   mute: true,
   skipQuiz: true,
-  autoNext: true
+  autoNext: true,
+  dismissIdle: true,
+  showHud: true
 };
 
-// 兼容不同加载环境（普通脚本 / 可能的模块上下文）
+const XXT_STATUS_KEY = 'xxtRuntimeStatus';
+const XXT_LOG_KEY = 'xxtActivityLog';
+const XXT_LOG_LIMIT = 40;
+
 if (typeof globalThis !== 'undefined') {
   globalThis.XXT_DEFAULT_SETTINGS = XXT_DEFAULT_SETTINGS;
+  globalThis.XXT_STATUS_KEY = XXT_STATUS_KEY;
+  globalThis.XXT_LOG_KEY = XXT_LOG_KEY;
+  globalThis.XXT_LOG_LIMIT = XXT_LOG_LIMIT;
 }

@@ -1,4 +1,4 @@
-// 模拟学习通课程页结构：顶层目录 + 步骤页签 + iframe 视频 + 答题弹窗钩子
+// 模拟学习通课程页结构：顶层目录 + 步骤页签 + iframe 视频 + 答题/防挂机弹窗
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -20,7 +20,6 @@ const framePage = `<!DOCTYPE html>
     document.getElementById('playOverlay').onclick = () => {
       document.getElementById('video_html5_api').play();
     };
-    // 暴露给测试：显示答题弹窗
     window.__showQuiz = () => {
       document.getElementById('quiz').style.display = 'block';
     };
@@ -45,20 +44,50 @@ const topPage = `<!DOCTYPE html>
           <span class="posCatalog_name" title="1.2 第二课">1.2 第二课</span>
           <span class="prevHoverTips">未完成</span>
         </div>
+        <div class="posCatalog_select" id="doneItem">
+          <span class="posCatalog_name" title="1.3 已完成课">1.3 已完成课</span>
+          <span class="prevHoverTips">已完成</span>
+        </div>
+        <div class="posCatalog_select" id="thirdItem">
+          <span class="posCatalog_name" title="1.4 第四课">1.4 第四课</span>
+          <span class="prevHoverTips">未完成</span>
+        </div>
       </li>
     </ul>
   </div>
   <button id="prevNextFocusNext" style="display:none">下一节</button>
+
+  <div class="maskDiv" id="idleMask" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);">
+    <div style="margin:20vh auto;width:240px;background:#fff;padding:20px;text-align:center;">
+      <p>检测到长时间未操作</p>
+      <button id="continueBtn">继续学习</button>
+    </div>
+  </div>
+
   <iframe src="/frame" width="400" height="300"></iframe>
   <script>
     document.getElementById('videoTab').onclick = () => {
       document.querySelector('.prev_title').title = '视频';
       document.querySelector('.prev_title').textContent = '视频';
     };
-    let nextClicks = 0;
-    document.getElementById('prevNextFocusNext').onclick = () => { nextClicks++; window.__nextClicks = nextClicks; };
-    document.getElementById('nextItem').querySelector('.posCatalog_name').onclick = () => {
-      window.__catalogClicked = true;
+    window.__idleDismissed = false;
+    document.getElementById('continueBtn').onclick = () => {
+      window.__idleDismissed = true;
+      document.getElementById('idleMask').style.display = 'none';
+    };
+    window.__showIdle = () => {
+      document.getElementById('idleMask').style.display = 'block';
+    };
+    window.__catalogClicked = null;
+    document.querySelectorAll('#coursetree .posCatalog_name').forEach(el => {
+      el.addEventListener('click', () => {
+        window.__catalogClicked = el.getAttribute('title');
+      });
+    });
+    // 供测试主动触发切章：标记当前任务完成
+    window.__markFinished = () => {
+      const tip = document.querySelector('.posCatalog_active .prevHoverTips');
+      if (tip) tip.textContent = '已完成';
     };
   </script>
 </body></html>`;

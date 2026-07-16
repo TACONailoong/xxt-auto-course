@@ -9,10 +9,14 @@ const DEFAULT_SETTINGS =
     autoAnswer: true,
     mute: true,
     skipQuiz: true,
-    autoNext: true
+    autoNext: true,
+    dismissIdle: true,
+    showHud: true
   };
 
-const STATUS_KEY = 'xxtRuntimeStatus';
+const STATUS_KEY =
+  (typeof XXT_STATUS_KEY !== 'undefined' && XXT_STATUS_KEY) || 'xxtRuntimeStatus';
+const LOG_KEY = (typeof XXT_LOG_KEY !== 'undefined' && XXT_LOG_KEY) || 'xxtActivityLog';
 
 let settings = { ...DEFAULT_SETTINGS };
 let saveTimer = null;
@@ -23,8 +27,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadSettings();
   updateUI();
   await refreshLiveStatus();
-  // 定期刷新页面状态
+  await refreshLogs();
   setInterval(refreshLiveStatus, 1500);
+  setInterval(refreshLogs, 2000);
 });
 
 function bindEvents() {
@@ -33,6 +38,8 @@ function bindEvents() {
   bindToggle('toggleMute', 'mute');
   bindToggle('toggleSkipQuiz', 'skipQuiz');
   bindToggle('toggleAutoNext', 'autoNext');
+  bindToggle('toggleDismissIdle', 'dismissIdle');
+  bindToggle('toggleShowHud', 'showHud');
 
   document.getElementById('speedSlider').addEventListener('input', event => {
     settings.playbackSpeed = parseFloat(event.target.value);
@@ -47,10 +54,20 @@ function bindEvents() {
       scheduleSave();
     });
   });
+
+  const clearBtn = document.getElementById('clearLogBtn');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', async () => {
+      await chrome.storage.local.set({ [LOG_KEY]: [] });
+      await refreshLogs();
+    });
+  }
 }
 
 function bindToggle(elementId, key) {
-  document.getElementById(elementId).addEventListener('click', () => {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  el.addEventListener('click', () => {
     settings[key] = !settings[key];
     updateUI();
     scheduleSave();
@@ -99,6 +116,46 @@ async function refreshLiveStatus() {
   }
 }
 
+async function refreshLogs() {
+  const listEl = document.getElementById('logList');
+  if (!listEl) return;
+  try {
+    const result = await chrome.storage.local.get(LOG_KEY);
+    const list = Array.isArray(result[LOG_KEY]) ? result[LOG_KEY] : [];
+    if (!list.length) {
+      listEl.innerHTML = '<li class="empty">暂无活动记录</li>';
+      return;
+    }
+    listEl.innerHTML = list
+      .slice(0, 8)
+      .map(item => {
+        const time = formatTime(item.t);
+        const msg = escapeHtml(item.message || '');
+        return `<li><span class="time">${time}</span><span class="msg">${msg}</span></li>`;
+      })
+      .join('');
+  } catch (error) {
+    listEl.innerHTML = '<li class="empty">日志读取失败</li>';
+  }
+}
+
+function formatTime(ts) {
+  if (!ts) return '--:--';
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 function updateUI() {
   const statusDot = document.getElementById('statusDot');
   const statusText = document.getElementById('statusText');
@@ -112,6 +169,8 @@ function updateUI() {
   setToggle('toggleMute', settings.mute);
   setToggle('toggleSkipQuiz', settings.skipQuiz);
   setToggle('toggleAutoNext', settings.autoNext);
+  setToggle('toggleDismissIdle', settings.dismissIdle);
+  setToggle('toggleShowHud', settings.showHud);
 
   document.getElementById('speedSlider').value = settings.playbackSpeed;
   document.getElementById('speedValue').textContent = settings.playbackSpeed + 'x';
@@ -122,7 +181,8 @@ function updateUI() {
 }
 
 function setToggle(id, active) {
-  document.getElementById(id).classList.toggle('active', !!active);
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('active', !!active);
 }
 
 function showSaveHint() {
