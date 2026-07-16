@@ -141,6 +141,10 @@ export class Game {
 
     this.player = new PlayerController(this.camera, this.world);
     this.player.bind(this.canvas);
+    try {
+      const s = localStorage.getItem('voxbound_sens');
+      if (s) this.player.mouseSens = parseFloat(s) || 0.002;
+    } catch { /* ignore */ }
     this.player.spawn(2, 2);
     // Face toward crashed ship
     {
@@ -349,6 +353,14 @@ export class Game {
       if (e.code === 'KeyP') {
         this.log(this._paused ? '继续航行。' : '已暂停。按 P 继续。');
         this._paused = !this._paused;
+      }
+      if (e.code === 'Comma') {
+        this.player.mouseSens = Math.max(0.0008, this.player.mouseSens - 0.0003);
+        this._toastSens();
+      }
+      if (e.code === 'Period') {
+        this.player.mouseSens = Math.min(0.005, this.player.mouseSens + 0.0003);
+        this._toastSens();
       }
     });
     window.addEventListener('keyup', (e) => {
@@ -582,10 +594,11 @@ export class Game {
     }
 
     if (this.mode === 'planet') {
-      this.player.update(dt, this.inventory);
+      this.player.update(dt);
       this.world.updateAround(this.player.position.x, this.player.position.z, 3);
       this.effects?.setHighlight(this.player.targetBlock);
       this.effects?.setToolVisible(true);
+      this._updateCrosshair(!!this.player.targetBlock, this._mining);
 
       const mining = this._mining && this.player.targetBlock && (this.player.pointerLocked || document.pointerLockElement === this.canvas);
       if (mining) {
@@ -612,13 +625,14 @@ export class Game {
       this.effects?.setHighlight(null);
       this.effects?.setMiningBeam(false);
       this.effects?.setToolVisible(false);
+      this._updateCrosshair(false, false);
       this.ship.syncKeys(this.player.keys);
       this.ship.yaw = this.player.yaw;
       this.ship.pitch = this.player.pitch;
       const transition = this.ship.update(dt, 'ship_planet', this.camera);
       this.player.yaw = this.ship.yaw;
       this.player.pitch = this.ship.pitch;
-      this.ship.updateCamera(this.camera);
+      this.ship.updateCamera(this.camera, dt);
       this.player.position.copy(this.ship.position);
       if (this.world) this.world.updateAround(this.ship.position.x, this.ship.position.z, 3);
       if (transition === 'to_space' || this.ship.position.y > 120) {
@@ -626,6 +640,7 @@ export class Game {
       }
     } else if (this.mode === 'space') {
       this.effects?.setToolVisible(false);
+      this._updateCrosshair(false, false);
       if (this.spaceGrace > 0) this.spaceGrace -= dt;
       this.ship.syncKeys(this.player.keys);
       this.ship.yaw = this.player.yaw;
@@ -633,7 +648,7 @@ export class Game {
       this.ship.update(dt, 'space', this.camera);
       this.player.yaw = this.ship.yaw;
       this.player.pitch = this.ship.pitch;
-      this.ship.updateCamera(this.camera);
+      this.ship.updateCamera(this.camera, dt);
       this.space.update(dt);
 
       if (this.spaceGrace <= 0) {
@@ -648,7 +663,7 @@ export class Game {
     } else if (this.mode === 'entering') {
       this.ship.syncKeys(this.player.keys);
       this.ship.update(dt, 'entering', this.camera);
-      this.ship.updateCamera(this.camera);
+      this.ship.updateCamera(this.camera, dt);
       this.entry.update(dt);
       this.space.update(dt);
     }
@@ -694,6 +709,26 @@ export class Game {
     }
 
     this.renderer.render(this.scene, this.camera);
+  }
+
+  _toastSens() {
+    const el = document.getElementById('settings-toast');
+    if (!el) return;
+    const pct = Math.round((this.player.mouseSens / 0.002) * 100);
+    el.textContent = `鼠标灵敏度 ${pct}%`;
+    el.classList.remove('hidden');
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => el.classList.add('hidden'), 1200);
+    try {
+      localStorage.setItem('voxbound_sens', String(this.player.mouseSens));
+    } catch { /* ignore */ }
+  }
+
+  _updateCrosshair(hasTarget, mining) {
+    const ch = document.getElementById('crosshair');
+    if (!ch) return;
+    ch.classList.toggle('has-target', hasTarget);
+    ch.classList.toggle('mining', mining);
   }
 
   _saveProgress() {

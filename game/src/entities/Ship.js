@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { sound } from '../audio/SoundManager.js';
 
 /**
- * Starship flight controller — planet atmosphere + space
+ * Starship flight — smooth banking, FOV boost, responsive feel
  */
 export class ShipController {
   constructor(shipMesh) {
@@ -12,12 +12,16 @@ export class ShipController {
     this.yaw = 0;
     this.pitch = 0;
     this.roll = 0;
+    this.targetRoll = 0;
     this.speed = 0;
     this.maxSpeed = 80;
-    this.spaceSpeed = 220;
+    this.spaceSpeed = 240;
     this.inSpace = false;
     this.enteringAtmosphere = false;
     this.entryTimer = 0;
+    this.cameraDist = 11;
+    this.cameraHeight = 3.2;
+    this.mouseSens = 0.002;
 
     this.pulseEngine = {
       repaired: false,
@@ -43,6 +47,7 @@ export class ShipController {
     this.position.set(x, y, z);
     this.yaw = yaw;
     this.pitch = 0;
+    this.roll = 0;
     this.speed = 0;
     this.velocity.set(0, 0, 0);
     this._applyMesh();
@@ -95,14 +100,14 @@ export class ShipController {
   _checkPulse() {
     if (this.pulseEngine.hasPlating && this.pulseEngine.hasSeal) {
       this.pulseEngine.repaired = true;
-      this.pulseEngine.fuel = 50;
+      this.pulseEngine.fuel = 55;
     }
   }
 
   _checkLaunch() {
     if (this.launchThruster.hasJelly && this.launchThruster.hasFerrite) {
       this.launchThruster.repaired = true;
-      this.launchThruster.fuel = 50;
+      this.launchThruster.fuel = 55;
     }
   }
 
@@ -122,16 +127,21 @@ export class ShipController {
     if (!this.repaired) return null;
 
     const boost = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
-    const throttle = this.keys['KeyW'] ? 1 : this.keys['KeyS'] ? -0.4 : 0;
-    const lift = this.keys['Space'] ? 1 : this.keys['ControlLeft'] ? -0.6 : 0;
+    const throttle = this.keys['KeyW'] ? 1 : this.keys['KeyS'] ? -0.35 : 0.05;
+    const lift = this.keys['Space'] ? 1 : this.keys['ControlLeft'] ? -0.7 : 0;
     const turn = (this.keys['KeyA'] ? 1 : 0) + (this.keys['KeyD'] ? -1 : 0);
 
-    // Steer with mouse (yaw/pitch already synced from player) + A/D
-    this.yaw += turn * 1.5 * dt;
-    this.pitch = THREE.MathUtils.clamp(this.pitch, -1.2, 0.85);
+    // Keyboard assist turn + mouse already sets yaw/pitch from Game
+    this.yaw += turn * 1.6 * dt;
+    this.pitch = THREE.MathUtils.clamp(this.pitch, -1.15, 0.9);
 
-    const targetSpeed = throttle * (boost ? 55 : 32);
-    this.speed = THREE.MathUtils.lerp(this.speed, targetSpeed, 1 - Math.pow(0.05, dt));
+    // Banking
+    this.targetRoll = turn * 0.45 + (boost ? 0 : 0);
+    // Also bank from mouse yaw change approx via A/D
+    this.roll = THREE.MathUtils.damp(this.roll, this.targetRoll, 6, dt);
+
+    const targetSpeed = throttle * (boost ? 62 : 36);
+    this.speed = THREE.MathUtils.damp(this.speed, targetSpeed, 4, dt);
 
     const forward = new THREE.Vector3(
       -Math.sin(this.yaw) * Math.cos(this.pitch),
@@ -139,13 +149,18 @@ export class ShipController {
       -Math.cos(this.yaw) * Math.cos(this.pitch)
     );
     this.position.addScaledVector(forward, this.speed * dt);
-    this.position.y += lift * 18 * dt;
-
-    // Keep above terrain roughly
-    if (this.position.y < 2) this.position.y = 2;
+    this.position.y += lift * 20 * dt;
+    if (this.position.y < 3) this.position.y = 3;
 
     if (lift > 0 && this.launchThruster.fuel > 0) {
-      this.launchThruster.fuel = Math.max(0, this.launchThruster.fuel - 4 * dt);
+      this.launchThruster.fuel = Math.max(0, this.launchThruster.fuel - 3.5 * dt);
+    }
+
+    // FOV
+    if (camera) {
+      const targetFov = boost ? 82 : 70;
+      camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, 5, dt);
+      camera.updateProjectionMatrix();
     }
 
     if (this.position.y > 120 && this.pulseEngine.repaired) {
@@ -158,18 +173,21 @@ export class ShipController {
 
   _flySpace(dt, camera, mode) {
     const boost = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
-    const throttle = this.keys['KeyW'] ? 1 : this.keys['KeyS'] ? -0.3 : 0.2;
+    const throttle = this.keys['KeyW'] ? 1 : this.keys['KeyS'] ? -0.25 : 0.18;
     const turn = (this.keys['KeyA'] ? 1 : 0) + (this.keys['KeyD'] ? -1 : 0);
     const lift = (this.keys['Space'] ? 1 : 0) + (this.keys['ControlLeft'] ? -1 : 0);
 
-    this.yaw += turn * 1.2 * dt;
-    this.pitch = THREE.MathUtils.clamp(this.pitch - lift * 0.7 * dt, -1.4, 1.4);
+    this.yaw += turn * 1.35 * dt;
+    this.pitch = THREE.MathUtils.clamp(this.pitch - lift * 0.75 * dt, -1.4, 1.4);
 
-    const max = boost && this.pulseEngine.fuel > 0 ? this.spaceSpeed : 100;
+    this.targetRoll = turn * 0.55;
+    this.roll = THREE.MathUtils.damp(this.roll, this.targetRoll, 5, dt);
+
+    const max = boost && this.pulseEngine.fuel > 0 ? this.spaceSpeed : 105;
     if (boost && this.pulseEngine.fuel > 0) {
-      this.pulseEngine.fuel = Math.max(0, this.pulseEngine.fuel - 3 * dt);
+      this.pulseEngine.fuel = Math.max(0, this.pulseEngine.fuel - 2.5 * dt);
     }
-    this.speed = THREE.MathUtils.lerp(this.speed, throttle * max, 1 - Math.pow(0.08, dt));
+    this.speed = THREE.MathUtils.damp(this.speed, throttle * max, 3.5, dt);
 
     const forward = new THREE.Vector3(
       -Math.sin(this.yaw) * Math.cos(this.pitch),
@@ -178,7 +196,13 @@ export class ShipController {
     );
     this.position.addScaledVector(forward, this.speed * dt);
 
-    sound.setThruster(true, Math.min(1, this.speed / 150));
+    if (camera) {
+      const targetFov = boost ? 88 : 72;
+      camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, 4, dt);
+      camera.updateProjectionMatrix();
+    }
+
+    sound.setThruster(true, Math.min(1, this.speed / 160));
 
     if (mode === 'entering') {
       this.entryTimer += dt;
@@ -194,9 +218,10 @@ export class ShipController {
   endEntry(surfaceY) {
     this.enteringAtmosphere = false;
     this.inSpace = false;
-    this.position.y = surfaceY + 40;
-    this.speed = 30;
-    this.pitch = 0.35;
+    this.position.y = surfaceY + 45;
+    this.speed = 28;
+    this.pitch = 0.3;
+    this.roll = 0;
   }
 
   _applyMesh() {
@@ -204,7 +229,7 @@ export class ShipController {
     this.mesh.position.copy(this.position);
     this.mesh.rotation.order = 'YXZ';
     this.mesh.rotation.y = this.yaw;
-    this.mesh.rotation.x = this.pitch * 0.85;
+    this.mesh.rotation.x = this.pitch * 0.9;
     this.mesh.rotation.z = -this.roll;
   }
 
@@ -212,25 +237,43 @@ export class ShipController {
     if (!this.mesh) return;
     const light = this.mesh.userData.engineLight;
     if (light) {
-      light.intensity = this.repaired ? 0.5 + Math.abs(this.speed) / 40 : 0.05;
+      light.intensity = this.repaired ? 0.6 + Math.abs(this.speed) / 35 : 0.05;
     }
     const glows = this.mesh.userData.glows || [];
     for (const g of glows) {
-      g.material.emissiveIntensity = this.repaired ? 0.6 + Math.abs(this.speed) / 80 : 0.1;
+      if (g.material) {
+        g.material.emissiveIntensity = this.repaired
+          ? 0.7 + Math.abs(this.speed) / 70 + Math.sin(performance.now() * 0.01) * 0.15
+          : 0.08;
+      }
+    }
+    // Pulse nav lights
+    const navs = this.mesh.userData.navLights || [];
+    const blink = Math.sin(performance.now() * 0.006) > 0 ? 1.2 : 0.3;
+    for (const n of navs) {
+      if (n.material) n.material.emissiveIntensity = blink;
     }
   }
 
-  /** Third-person camera behind ship */
-  updateCamera(camera) {
+  /** Smooth chase camera behind ship */
+  updateCamera(camera, dt = 0.016) {
     const back = new THREE.Vector3(
-      Math.sin(this.yaw) * Math.cos(this.pitch * 0.6),
-      0.25 - Math.sin(this.pitch) * 0.5,
-      Math.cos(this.yaw) * Math.cos(this.pitch * 0.6)
+      Math.sin(this.yaw) * Math.cos(this.pitch * 0.5),
+      0.2 - Math.sin(this.pitch) * 0.4,
+      Math.cos(this.yaw) * Math.cos(this.pitch * 0.5)
     );
-    camera.position.copy(this.position).addScaledVector(back, 9).add(new THREE.Vector3(0, 2.8, 0));
+    const desired = this.position
+      .clone()
+      .addScaledVector(back, this.cameraDist)
+      .add(new THREE.Vector3(0, this.cameraHeight, 0));
+
+    // Soft follow
+    camera.position.lerp(desired, 1 - Math.pow(0.0008, dt));
     camera.rotation.order = 'YXZ';
+    camera.rotation.y = THREE.MathUtils.damp(camera.rotation.y, this.yaw, 10, dt);
+    // Keep yaw continuous
     camera.rotation.y = this.yaw;
-    camera.rotation.x = this.pitch * 0.9;
-    camera.rotation.z = 0;
+    camera.rotation.x = THREE.MathUtils.damp(camera.rotation.x, this.pitch * 0.85, 10, dt);
+    camera.rotation.z = THREE.MathUtils.damp(camera.rotation.z, -this.roll * 0.5, 8, dt);
   }
 }

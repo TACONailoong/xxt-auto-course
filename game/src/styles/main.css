@@ -297,39 +297,97 @@ html, body {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   transform: translate(-50%, -50%);
   pointer-events: none;
   z-index: 20;
+  transition: width 0.15s, height 0.15s;
 }
 
 .ch-h, .ch-v {
   position: absolute;
-  background: rgba(232, 240, 244, 0.85);
-  box-shadow: 0 0 6px rgba(62, 207, 180, 0.5);
+  background: rgba(232, 240, 244, 0.9);
+  box-shadow: 0 0 6px rgba(62, 207, 180, 0.55);
+  transition: background 0.12s, box-shadow 0.12s;
 }
-.ch-h { left: 4px; right: 4px; top: 50%; height: 1px; margin-top: -0.5px; }
-.ch-v { top: 4px; bottom: 4px; left: 50%; width: 1px; margin-left: -0.5px; }
+.ch-h { left: 5px; right: 5px; top: 50%; height: 1.5px; margin-top: -0.75px; }
+.ch-v { top: 5px; bottom: 5px; left: 50%; width: 1.5px; margin-left: -0.75px; }
 .ch-ring {
   position: absolute;
   inset: 0;
-  border: 1px solid rgba(62, 207, 180, 0.35);
+  border: 1px solid rgba(62, 207, 180, 0.4);
   border-radius: 50%;
+  transition: border-color 0.12s, transform 0.15s;
+}
+.ch-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  background: var(--amber);
+  border-radius: 50%;
+  opacity: 0.85;
+}
+
+#crosshair.has-target .ch-h,
+#crosshair.has-target .ch-v {
+  background: var(--cyan);
+  box-shadow: 0 0 10px rgba(62, 207, 180, 0.8);
+}
+#crosshair.has-target .ch-ring {
+  border-color: var(--cyan);
+  transform: scale(1.15);
+}
+#crosshair.mining {
+  width: 40px;
+  height: 40px;
+}
+#crosshair.mining .ch-ring {
+  border-color: var(--amber);
+  animation: crossSpin 0.6s linear infinite;
+}
+#crosshair.mining .ch-h,
+#crosshair.mining .ch-v {
+  background: var(--amber);
+}
+
+@keyframes crossSpin {
+  from { transform: scale(1.1) rotate(0deg); }
+  to { transform: scale(1.1) rotate(90deg); }
+}
+
+#settings-toast {
+  position: absolute;
+  top: 22%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.15em;
+  color: var(--cyan);
+  background: rgba(5, 12, 20, 0.85);
+  border: 1px solid var(--cyan-dim);
+  padding: 0.45rem 1rem;
+  pointer-events: none;
 }
 
 #mission-panel {
   position: absolute;
   top: 1.25rem;
   left: 1.25rem;
-  width: min(320px, 42vw);
-  background: var(--panel);
+  width: min(340px, 44vw);
+  background: linear-gradient(135deg, rgba(8, 18, 32, 0.92), rgba(6, 14, 26, 0.88));
   border: 1px solid var(--panel-border);
   border-left: 3px solid var(--amber);
-  padding: 0.85rem 1rem;
-  backdrop-filter: blur(8px);
-  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+  padding: 0.9rem 1.05rem;
+  backdrop-filter: blur(10px);
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%);
   z-index: 25;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
 }
 
 .mission-header {
@@ -848,21 +906,22 @@ html, body {
 }
 
 .hot-slot {
-  width: 48px;
-  height: 48px;
-  background: var(--panel);
-  border: 1px solid rgba(62, 207, 180, 0.25);
+  width: 52px;
+  height: 52px;
+  background: linear-gradient(180deg, rgba(10,22,40,0.9), rgba(6,14,24,0.85));
+  border: 1px solid rgba(62, 207, 180, 0.28);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   font-size: 0.6rem;
   position: relative;
+  clip-path: polygon(4px 0, calc(100% - 4px) 0, 100% 4px, 100% calc(100% - 4px), calc(100% - 4px) 100%, 4px 100%, 0 calc(100% - 4px), 0 4px);
 }
 
 .hot-slot.active {
   border-color: var(--amber);
-  box-shadow: 0 0 12px var(--amber-dim);
+  box-shadow: 0 0 14px var(--amber-dim), inset 0 0 12px rgba(232,168,50,0.08);
 }
 
 .hot-slot .key {

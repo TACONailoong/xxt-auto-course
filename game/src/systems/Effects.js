@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BLOCK_COLORS, BLOCK_NAMES, BLOCKS } from '../core/constants.js';
 import { sound } from '../audio/SoundManager.js';
+import { createMultiTool } from '../models/ShipModel.js';
 
 /**
  * Visual FX: block outline, mining beam, break particles, floating loot text
@@ -45,29 +46,13 @@ export class Effects {
     this.beamLight = new THREE.PointLight(0x3ecfb4, 0, 8);
     scene.add(this.beamLight);
 
-    // Multi-tool held model (simple voxel gun)
-    this.tool = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(0.12, 0.14, 0.45),
-      new THREE.MeshLambertMaterial({ color: 0x2a3544, flatShading: true })
-    );
-    this.tool.add(body);
-    const tip = new THREE.Mesh(
-      new THREE.BoxGeometry(0.08, 0.08, 0.12),
-      new THREE.MeshLambertMaterial({
-        color: 0x3ecfb4,
-        emissive: 0x3ecfb4,
-        emissiveIntensity: 0.4,
-        flatShading: true,
-      })
-    );
-    tip.position.z = -0.28;
-    this.tool.add(tip);
+    // Multi-tool held model
+    this.tool = createMultiTool();
     this.tool.visible = false;
     camera.add(this.tool);
-    this.tool.position.set(0.28, -0.22, -0.45);
-    this.tool.rotation.set(0.1, -0.15, 0.05);
-    // camera must be in scene for tool to show — Game adds camera
+    this.tool.position.set(0.32, -0.24, -0.48);
+    this.tool.rotation.set(0.12, -0.2, 0.08);
+    this.toolBob = 0;
   }
 
   setHighlight(block) {
@@ -94,9 +79,11 @@ export class Effects {
     this.beam.scale.set(1.2, 1.2, Math.max(0.15, dist));
     this.beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.normalize());
     this.beamLight.position.copy(to);
-    this.beamLight.intensity = 1.5 + Math.sin(performance.now() * 0.02) * 0.5;
-    const t = (Math.sin(performance.now() * 0.015) + 1) * 0.5;
-    this.beam.material.color.setRGB(0.15 + t * 0.25, 0.9, 0.55 + t * 0.25);
+    this.beamLight.intensity = 1.6 + Math.sin(performance.now() * 0.025) * 0.5;
+    const t = (Math.sin(performance.now() * 0.02) + 1) * 0.5;
+    this.beam.material.color.setRGB(0.1 + t * 0.3, 0.95, 0.5 + t * 0.3);
+    this.tool.position.z = -0.48 + Math.sin(performance.now() * 0.04) * 0.015;
+    this.tool.rotation.x = 0.12 + Math.sin(performance.now() * 0.05) * 0.04;
   }
 
   setToolVisible(v) {
@@ -161,6 +148,12 @@ export class Effects {
       const y = (-ndc.y * 0.5 + 0.5) * window.innerHeight;
       f.el.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
       f.el.style.opacity = String(Math.min(1, f.life));
+    }
+
+    if (this.tool.visible && !this.beam.visible) {
+      this.toolBob += dt;
+      this.tool.position.y = -0.24 + Math.sin(this.toolBob * 2) * 0.008;
+      this.tool.rotation.z = 0.08 + Math.sin(this.toolBob * 1.5) * 0.02;
     }
   }
 }

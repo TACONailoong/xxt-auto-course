@@ -8,15 +8,18 @@ export class PlayerController {
     this.world = world;
     this.position = new THREE.Vector3(0, 40, 0);
     this.velocity = new THREE.Vector3();
+    this.wishVel = new THREE.Vector3();
     this.yaw = 0;
     this.pitch = 0;
     this.onGround = false;
-    this.flying = false; // ship mode handled elsewhere
     this.height = 1.7;
-    this.radius = 0.3;
-    this.speed = 6;
-    this.sprintMul = 1.6;
-    this.jumpForce = 8;
+    this.radius = 0.32;
+    this.speed = 6.5;
+    this.sprintMul = 1.7;
+    this.jumpForce = 8.2;
+    this.accel = 28;
+    this.airAccel = 10;
+    this.friction = 12;
     this.jetpackFuel = 100;
     this.jetpackMax = 100;
     this.life = 100;
@@ -26,6 +29,11 @@ export class PlayerController {
     this.footTimer = 0;
     this.mineCooldown = 0;
     this.targetBlock = null;
+    this.mouseSens = 0.002;
+    this.bobPhase = 0;
+    this.bobAmt = 0;
+    this.fovBase = 70;
+    this.fovSprint = 76;
 
     this._onKeyDown = (e) => {
       this.keys[e.code] = true;
@@ -36,8 +44,13 @@ export class PlayerController {
     };
     this._onMouseMove = (e) => {
       if (!this.pointerLocked) return;
-      this.yaw -= e.movementX * 0.0022;
-      this.pitch -= e.movementY * 0.0022;
+      // Slight acceleration curve for fine aim
+      const dx = e.movementX;
+      const dy = e.movementY;
+      const mag = Math.sqrt(dx * dx + dy * dy);
+      const curve = 1 + Math.min(1.4, mag * 0.015);
+      this.yaw -= dx * this.mouseSens * curve;
+      this.pitch -= dy * this.mouseSens * curve;
       this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch));
     };
   }
@@ -67,15 +80,34 @@ export class PlayerController {
     return dir;
   }
 
-  updateCamera() {
+  updateCamera(dt = 0.016) {
+    // Head bob when walking
+    const moving = this.onGround && (Math.abs(this.velocity.x) + Math.abs(this.velocity.z)) > 1;
+    if (moving) {
+      this.bobPhase += dt * (this.keys['ShiftLeft'] || this.keys['ShiftRight'] ? 14 : 10);
+      this.bobAmt = THREE.MathUtils.lerp(this.bobAmt, 1, 1 - Math.pow(0.01, dt));
+    } else {
+      this.bobAmt = THREE.MathUtils.lerp(this.bobAmt, 0, 1 - Math.pow(0.001, dt));
+    }
+    const bobY = Math.sin(this.bobPhase) * 0.04 * this.bobAmt;
+    const bobX = Math.cos(this.bobPhase * 0.5) * 0.02 * this.bobAmt;
+
     this.camera.position.copy(this.position);
-    this.camera.position.y += this.height;
+    this.camera.position.y += this.height + bobY;
+    this.camera.position.x += Math.cos(this.yaw) * bobX;
+    this.camera.position.z += Math.sin(this.yaw) * bobX;
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.y = this.yaw;
     this.camera.rotation.x = this.pitch;
+
+    // FOV punch when sprinting
+    const sprint = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
+    const targetFov = sprint && moving ? this.fovSprint : this.fovBase;
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 1 - Math.pow(0.01, dt));
+    this.camera.updateProjectionMatrix();
   }
 
-  update(dt, inventory, onMine) {
+  update(dt) {
     if (this.mineCooldown > 0) this.mineCooldown -= dt;
 
     const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
@@ -88,55 +120,69 @@ export class PlayerController {
     if (wish.lengthSq() > 0) wish.normalize();
 
     const sprint = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
-    const spd = this.speed * (sprint ? this.sprintMul : 1);
-    this.velocity.x = wish.x * spd;
-    this.velocity.z = wish.z * spd;
+    const crouch = this.keys['ControlLeft'] || this.keys['KeyC'] && false; // C is craft
+    const spd = this.speed * (sprint ? this.sprintMul : 1) * (this.keys['ControlLeft'] ? 0.55 : 1);
+    this.wishVel.set(wish.x * spd, 0, wish.z * spd);
+
+    // Smooth horizontal acceleration
+    const accel = this.onGround ? this.accel : this.airAccel;
+    this.velocity.x = THREE.MathUtils.damp(this.velocity.x, this.wishVel.x, accel * 0.15, dt);
+    this.velocity.z = THREE.MathUtils.damp(this.velocity.z, this.wishVel.z, accel * 0.15, dt);
+
+    // Ground friction when no input
+    if (this.onGround && wish.lengthSq() === 0) {
+      this.velocity.x = THREE.MathUtils.damp(this.velocity.x, 0, this.friction * 0.2, dt);
+      this.velocity.z = THREE.MathUtils.damp(this.velocity.z, 0, this.friction * 0.2, dt);
+    }
 
     // Jump / jetpack
     const jump = this.keys['Space'];
     if (jump && this.onGround) {
       this.velocity.y = this.jumpForce;
       this.onGround = false;
+      sound.footstep();
     } else if (jump && !this.onGround && this.jetpackFuel > 0) {
-      this.velocity.y = Math.min(6, this.velocity.y + 25 * dt);
-      this.jetpackFuel = Math.max(0, this.jetpackFuel - 35 * dt);
-      if (Math.random() < 0.15) sound.jetpack();
+      this.velocity.y = Math.min(7, this.velocity.y + 28 * dt);
+      this.jetpackFuel = Math.max(0, this.jetpackFuel - 32 * dt);
+      if (Math.random() < 0.12) sound.jetpack();
     } else {
-      this.velocity.y -= 22 * dt;
+      this.velocity.y -= 24 * dt;
       if (this.onGround) {
-        this.jetpackFuel = Math.min(this.jetpackMax, this.jetpackFuel + 25 * dt);
+        this.jetpackFuel = Math.min(this.jetpackMax, this.jetpackFuel + 28 * dt);
       }
     }
+
+    // Cap fall speed
+    this.velocity.y = Math.max(-40, this.velocity.y);
 
     this._moveAxis(dt, 'x');
     this._moveAxis(dt, 'y');
     this._moveAxis(dt, 'z');
 
-    // Footsteps
     if (this.onGround && wish.lengthSq() > 0) {
       this.footTimer += dt;
-      if (this.footTimer > (sprint ? 0.28 : 0.4)) {
+      if (this.footTimer > (sprint ? 0.26 : 0.38)) {
         this.footTimer = 0;
         sound.footstep();
       }
     }
 
-    this.updateCamera();
-    this.targetBlock = this.raycastBlock(5);
+    this.updateCamera(dt);
+    this.targetBlock = this.raycastBlock(5.5);
 
     // Hazard drain
-    this.hazard = Math.max(0, this.hazard - 1.2 * dt);
+    this.hazard = Math.max(0, this.hazard - 1.0 * dt);
     if (this.hazard < 15) {
-      this.life = Math.max(0, this.life - 3 * dt);
+      this.life = Math.max(0, this.life - 2.5 * dt);
     }
   }
 
   tryMine(inventory) {
     if (this.mineCooldown > 0 || !this.targetBlock) return null;
     const { x, y, z, id } = this.targetBlock;
-    if (id === BLOCKS.AIR || id === BLOCKS.BEDROCK) return null;
+    if (id === BLOCKS.AIR || id === BLOCKS.BEDROCK || id === BLOCKS.WATER) return null;
     this.world.setBlock(x, y, z, BLOCKS.AIR);
-    this.mineCooldown = 0.2;
+    this.mineCooldown = 0.18;
     const hard = id === BLOCKS.STONE || id === BLOCKS.FERRITE_ROCK || id === BLOCKS.COPPER_ORE;
     sound.mine(hard);
     const drop = BLOCK_DROPS[id];
@@ -170,6 +216,9 @@ export class PlayerController {
     } else if (axis === 'y') {
       if (this.velocity.y < 0) this.onGround = true;
       this.velocity.y = 0;
+    } else {
+      // Slide: kill that axis
+      this.velocity[axis] = 0;
     }
   }
 
@@ -207,7 +256,7 @@ export class PlayerController {
     let tMaxY = stepY > 0 ? (Math.floor(origin.y) + 1 - origin.y) * tDeltaY : (origin.y - Math.floor(origin.y)) * tDeltaY;
     let tMaxZ = stepZ > 0 ? (Math.floor(origin.z) + 1 - origin.z) * tDeltaZ : (origin.z - Math.floor(origin.z)) * tDeltaZ;
     let dist = 0;
-    for (let i = 0; i < 64; i++) {
+    for (let i = 0; i < 72; i++) {
       const id = this.world.getBlock(x, y, z);
       if (id !== BLOCKS.AIR && id !== BLOCKS.WATER) {
         return { x, y, z, id };
