@@ -12,6 +12,9 @@ import {
   createStarship,
   createAbandonedBuilding,
   createDistressBeacon,
+  createCrashDebris,
+  createCrystalCluster,
+  animateStarship,
 } from '../models/ShipModel.js';
 import { UIManager } from '../ui/UIManager.js';
 import { WaypointHUD } from '../ui/WaypointHUD.js';
@@ -104,11 +107,17 @@ export class Game {
     const sz = this.shipPos.z;
     const sy = this.world.surfaceY(sx, sz);
     this.shipPos.y = sy;
-    this.shipMesh = createStarship({ damaged: true, accent: 0x3ecfb4, engine: 0xe8a832, scale: 1.6 });
+    this.shipMesh = createStarship({ damaged: true, accent: 0x3ecfb4, engine: 0xe8a832, scale: 1.65 });
     this.shipMesh.position.set(sx, sy, sz);
     this.shipMesh.rotation.y = 0.8;
     this.shipMesh.rotation.z = 0.12;
     this.scene.add(this.shipMesh);
+
+    // Crash debris field
+    this.debris = createCrashDebris();
+    this.debris.position.set(sx, sy, sz);
+    this.debris.rotation.y = 0.8;
+    this.scene.add(this.debris);
 
     // Visible crash plume light
     const crashLight = new THREE.PointLight(0xff6020, 1.4, 28);
@@ -155,6 +164,22 @@ export class Game {
 
     // Guaranteed starter resources near spawn
     this._seedStarterResources();
+
+    // Decorative crystal props near spawn / path to ship
+    this._propCrystals = [];
+    for (const [x, z, col] of [
+      [6, 3, 0x4a9eff],
+      [9, 6, 0x7ae0ff],
+      [11, 9, 0x4a9eff],
+      [4, 8, 0x60b0ff],
+    ]) {
+      const crystal = createCrystalCluster(col);
+      const cy = this.world.surfaceY(x, z);
+      crystal.position.set(x + 0.5, cy, z + 0.5);
+      crystal.scale.setScalar(0.85 + Math.random() * 0.3);
+      this.scene.add(crystal);
+      this._propCrystals.push(crystal);
+    }
 
     // Tall smoke plume so ship is easy to spot
     this._crashPlume = new THREE.Group();
@@ -466,12 +491,13 @@ export class Game {
         const pos = this.shipMesh.position.clone();
         const rotY = this.shipMesh.rotation.y;
         this.scene.remove(this.shipMesh);
-        this.shipMesh = createStarship({ damaged: false, accent: 0x3ecfb4, engine: 0xe8a832, scale: 1.6 });
+        this.shipMesh = createStarship({ damaged: false, accent: 0x3ecfb4, engine: 0xe8a832, scale: 1.65 });
         this.shipMesh.position.copy(pos);
         this.shipMesh.rotation.y = rotY;
         this.shipMesh.userData.damaged = false;
         this.scene.add(this.shipMesh);
         this.ship.mesh = this.shipMesh;
+        if (this.debris) this.debris.visible = false;
       }
       sound.shipEnter();
       sound.liftoff();
@@ -544,6 +570,11 @@ export class Game {
     const home = planetDef.id === 'awakening';
     this.beacon.visible = home;
     this.building.visible = home;
+    if (this.debris) this.debris.visible = home;
+    if (this._crashPlume) this._crashPlume.visible = home;
+    if (this._propCrystals) {
+      for (const c of this._propCrystals) c.visible = home;
+    }
 
     this.mode = 'ship_planet';
     this.log(`降落于 ${planetDef.name}。按 F 在低空离舰探索。`);
@@ -668,10 +699,26 @@ export class Game {
       this.space.update(dt);
     }
 
-    // Beacon pulse
+    // Beacon pulse + dish spin
     if (this.beacon && this.beacon.userData.lamp) {
       const pulse = 0.5 + Math.sin(performance.now() * 0.008) * 0.5;
       this.beacon.userData.lamp.material.emissiveIntensity = pulse;
+    }
+    if (this.beacon?.userData.dish) {
+      this.beacon.userData.dish.rotation.y += dt * 1.2;
+    }
+
+    // Animate starship parts
+    if (this.shipMesh) {
+      const spd = this.mode === 'planet' ? 0 : this.ship.speed;
+      animateStarship(this.shipMesh, dt, spd);
+    }
+
+    // Debris / crystal subtle idle
+    if (this._propCrystals) {
+      for (const c of this._propCrystals) {
+        c.rotation.y += dt * 0.3;
+      }
     }
 
     // Hazard warning

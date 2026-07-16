@@ -613,23 +613,36 @@ html, body {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 120px;
-  height: 80px;
+  width: 140px;
+  height: 90px;
   transform: translate(-50%, -50%);
 }
 
 .ret-corner {
   position: absolute;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   border-color: var(--cyan);
   border-style: solid;
-  opacity: 0.7;
+  opacity: 0.8;
+  transition: opacity 0.2s;
 }
 .ret-corner.tl { top: 0; left: 0; border-width: 2px 0 0 2px; }
 .ret-corner.tr { top: 0; right: 0; border-width: 2px 2px 0 0; }
 .ret-corner.bl { bottom: 0; left: 0; border-width: 0 0 2px 2px; }
 .ret-corner.br { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
+
+#ship-hud:not(.hidden) .ship-reticule::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px;
+  border: 1px solid var(--amber);
+  transform: rotate(45deg);
+}
 
 #altitude-readout {
   position: absolute;
