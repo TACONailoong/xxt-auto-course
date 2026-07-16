@@ -311,8 +311,8 @@
         if (video.paused && !video.ended) this.tryPlay(video);
       } else if (!video.paused) {
         video.pause();
-        // 限流/学完/验证暂停时保留原因，勿覆盖
-        if (!isProtectedStatusPhase(this.status.phase)) {
+        // 仅顶层写入暂停文案，避免 iframe 把 verify/stall 覆盖成普通 paused
+        if (IS_TOP && !isProtectedStatusPhase(this.status.phase)) {
           this.setStatus('paused', '已暂停自动刷课');
         }
       }
@@ -383,12 +383,16 @@
         if (typeof payload.hasVideo === 'boolean') {
           this.status.hasVideo = payload.hasVideo;
         }
-        if (
+        const specificPhases = ['verify', 'stall', 'limit', 'done', 'dead'];
+        const hasSpecific = specificPhases.includes(this.status.phase);
+        const canAdoptPhase =
           payload.phase &&
           isProtectedStatusPhase(payload.phase) &&
           typeof payload.detail === 'string' &&
-          payload.detail
-        ) {
+          payload.detail &&
+          // 勿用普通 paused 覆盖更具体的暂停原因
+          !(hasSpecific && payload.phase === 'paused');
+        if (canAdoptPhase) {
           const prevDetail = this.status.detail;
           this.status.phase = payload.phase;
           this.status.detail = payload.detail;

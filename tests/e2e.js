@@ -250,8 +250,14 @@ function sleep(ms) {
       const footerText = await popup.$eval('.footer', el => el.textContent);
       check('弹窗版本为 1.13.0', footerText.includes('v1.13.0'), footerText);
 
-      const liveProgressWidth = await popup.$eval('#liveProgress', el => el.style.width || '0%');
-      const livePct = parseFloat(liveProgressWidth) || 0;
+      let livePct = 0;
+      let liveProgressWidth = '0%';
+      for (let i = 0; i < 5; i++) {
+        liveProgressWidth = await popup.$eval('#liveProgress', el => el.style.width || '0%');
+        livePct = parseFloat(liveProgressWidth) || 0;
+        if (livePct > 0) break;
+        await sleep(800);
+      }
       check('弹窗进度条反映播放进度', livePct > 0, `width=${liveProgressWidth}`);
 
       await popup.click('.preset-btn[data-speed="3"]');
