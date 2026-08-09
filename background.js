@@ -1,67 +1,118 @@
 // 学习通自动刷课插件 - 背景脚本
+// 职责：补齐默认配置、更新 badge、处理快捷键。
 
-// 监听插件安装或更新
-chrome.runtime.onInstalled.addListener((details) => {
-  if (details.reason === 'install') {
-    // 插件首次安装
-    console.log('学习通自动刷课助手已安装');
+importScripts('shared/defaults.js', 'shared/dom.js');
 
-    // 设置默认配置
-    chrome.storage.sync.set({
-      isRunning: true,
-      playbackSpeed: 1.5,
-      autoAnswer: true
-    });
-  } else if (details.reason === 'update') {
-    // 插件更新
-    console.log('学习通自动刷课助手已更新到新版本');
-  }
-});
+const DEFAULT_SETTINGS = globalThis.XXT_DEFAULT_SETTINGS;
+const STATUS_KEY = globalThis.XXT_STATUS_KEY;
+const HUD_LAYOUT_KEY = globalThis.XXT_HUD_LAYOUT_KEY;
+const RELOAD_HINT_KEY = globalThis.XXT_RELOAD_HINT_KEY || 'xxtReloadHint';
+const badgeForPausedPhase =
+  globalThis.xxtBadgeForPausedPhase ||
+  (() => ({ text: '停', color: '#94a3b8', label: '已停止' }));
 
-// 监听来自content script的消息
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'LOG') {
-    console.log('[Content Script]', message.message);
-  } else if (message.type === 'GET_SETTINGS') {
-    chrome.storage.sync.get(['isRunning', 'playbackSpeed', 'autoAnswer']).then(result => {
-      sendResponse(result);
-    });
-    return true; // 保持消息通道打开以便异步响应
-  }
-});
+async function ensureDefaults() {
+  const current = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+  await chrome.storage.sync.set({ ...DEFAULT_SETTINGS, ...current });
+}
 
-// 监听标签页更新，以便在用户切换到学习通页面时激活插件
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && tab.url) {
-    // 检查是否是学习通域名
-    const isChaoxing = tab.url.includes('chaoxing.com') || tab.url.includes('fx361.com');
-
-    if (isChaoxing) {
-      // 向标签页发送激活消息
-      chrome.tabs.sendMessage(tabId, {
-        type: 'TAB_ACTIVATED',
-        url: tab.url
-      }).catch(err => {
-        // 忽略错误，可能是内容脚本还没加载
-      });
-    }
-  }
-});
-
-// 监听标签页激活
-chrome.tabs.onActivated.addListener(async (activeInfo) => {
+async function updateBadgeFromState() {
   try {
-    const tab = await chrome.tabs.get(activeInfo.tabId);
-    if (tab.url && (tab.url.includes('chaoxing.com') || tab.url.includes('fx361.com'))) {
-      // 发送激活消息
-      chrome.tabs.sendMessage(activeInfo.tabId, {
-        type: 'TAB_ACTIVATED',
-        url: tab.url
-      }).catch(err => {
-        // 忽略错误
+    const sync = await chrome.storage.sync.get({ isRunning: true });
+    const local = await chrome.storage.local.get(STATUS_KEY);
+    const status = local[STATUS_KEY];
+    const fresh = status && Date.now() - (status.updatedAt || 0) < 20000;
+
+    if (!sync.isRunning) {
+      const badge = badgeForPausedPhase(fresh ? status.phase : '');
+      await chrome.action.setBadgeText({ text: badge.text });
+      await chrome.action.setBadgeBackgroundColor({ color: badge.color });
+      await chrome.action.setTitle({
+        title: `学习通助手：${(fresh && status && status.detail) || badge.label}`
       });
+      return;
+    }
+
+    if (fresh) {
+      await chrome.action.setBadgeText({ text: 'ON' });
+      await chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
+      const remain =
+        typeof status.remaining === 'number' ? ` · 剩余${status.remaining}` : '';
+      await chrome.action.setTitle({
+        title: `学习通助手：${status.detail || '运行中'}${remain}`
+      });
+    } else {
+      await chrome.action.setBadgeText({ text: '' });
+      await chrome.action.setTitle({ title: '学习通自动刷课助手' });
     }
   } catch (error) {
-    console.error('获取标签页信息失败:', error);
+    console.error('更新 badge 失败:', error);
+  }
+}
+
+async function toggleRun() {
+  const current = await chrome.storage.sync.get({ isRunning: true });
+  await chrome.storage.sync.set({ isRunning: !current.isRunning });
+}
+
+async function showHud() {
+  await chrome.storage.sync.set({ showHud: true });
+  try {
+    const result = await chrome.storage.local.get(HUD_LAYOUT_KEY);
+    const layout = result[HUD_LAYOUT_KEY] || {};
+    await chrome.storage.local.set({
+      [HUD_LAYOUT_KEY]: { ...layout, compact: false }
+    });
+  } catch (_) {}
+}
+
+chrome.runtime.onInstalled.addListener(async details => {
+  try {
+    await ensureDefaults();
+  } catch (error) {
+    console.error('初始化默认配置失败:', error);
+  }
+
+  if (details.reason === 'install') {
+    console.log('学习通自动刷课助手已安装');
+  } else if (details.reason === 'update') {
+    console.log('学习通自动刷课助手已更新到', chrome.runtime.getManifest().version);
+    try {
+      await chrome.storage.local.set({ [RELOAD_HINT_KEY]: Date.now() });
+    } catch (_) {}
+  }
+  await updateBadgeFromState();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  updateBadgeFromState();
+});
+
+chrome.commands.onCommand.addListener(async command => {
+  try {
+    if (command === 'toggle-run') {
+      await toggleRun();
+    } else if (command === 'show-hud') {
+      await showHud();
+    }
+  } catch (error) {
+    console.error('快捷键处理失败:', error);
+  }
+});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message && message.type === 'STATUS_UPDATE') {
+    updateBadgeFromState().then(() => sendResponse({ ok: true }));
+    return true;
+  }
+  return false;
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'sync' && (changes.isRunning || changes.showHud)) {
+    updateBadgeFromState();
+  }
+  if (area === 'local' && changes[STATUS_KEY]) {
+    updateBadgeFromState();
   }
 });
