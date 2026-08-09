@@ -131,5 +131,5 @@ pip install pillow && python3 scripts/generate_icons.py
 
 ## 版本
 
-- 版本：1.14.0
+- 版本：1.14.1
 - 兼容：Chrome、Edge、Firefox 115+

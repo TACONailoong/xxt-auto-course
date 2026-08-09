@@ -13,12 +13,16 @@ function xxtIsVisible(el) {
 function xxtSafeClick(el) {
   if (!el) return false;
   try {
-    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-    if (typeof el.click === 'function') el.click();
+    // 仅调用原生 click：一次事件派发会同时触发 JS 监听器与原生行为
+    // （checkbox/radio 切换、button 提交、链接跳转等）。
+    // 此前 dispatchEvent + el.click 双调用会导致按钮被连点两次。
+    el.click();
     return true;
   } catch (_) {
     try {
-      el.click();
+      el.dispatchEvent(
+        new MouseEvent('click', { bubbles: true, cancelable: true, view: window })
+      );
       return true;
     } catch (__) {
       return false;

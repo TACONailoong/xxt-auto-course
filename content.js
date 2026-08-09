@@ -637,6 +637,11 @@
     }
 
     async bumpStat(key) {
+      if (!IS_TOP) {
+        // iframe 不直接写统计，转由顶层统一累加，避免多帧并发读改写覆盖计数
+        window.parent.postMessage({ type: 'XXT_STATS_BUMP', key }, '*');
+        return;
+      }
       if (!this.ensureAlive()) return;
       try {
         const result = await chrome.storage.local.get(STATS_KEY);
@@ -648,13 +653,9 @@
         );
         this.stats = stats;
         await chrome.storage.local.set({ [STATS_KEY]: stats });
-        if (IS_TOP) {
-          this.publishStatus(true);
-          this.updateHud();
-          if (key === 'nextCount') await this.enforceLimits();
-        } else {
-          window.parent.postMessage({ type: 'XXT_STATS_UPDATED' }, '*');
-        }
+        this.publishStatus(true);
+        this.updateHud();
+        if (key === 'nextCount') await this.enforceLimits();
       } catch (error) {
         this.handleRuntimeError(error);
       }
@@ -1099,10 +1100,15 @@
     }
 
     findVideo() {
+      // 匹配优先级固定：学习通播放器（video_html5_api / video-js）优先，
+      // 最后才兜底任意 video，避免文档页等场景误接管页面内其他视频
       return (
         document.querySelector('video#video_html5_api') ||
         document.querySelector('video[id*="video_html5"]') ||
-        document.querySelector('video')
+        document.querySelector('.video-js video') ||
+        document.querySelector('.ans-attach-ct video') ||
+        document.querySelector('video') ||
+        null
       );
     }
 
@@ -1493,19 +1499,20 @@
         if (clickIfMatch(root)) return true;
       }
 
+      // 兜底扫描：仅处理可见弹窗容器内的按钮，避免误点页面普通控件
       for (const btn of document.querySelectorAll('a, button, .jb_btn')) {
+        if (!isVisible(btn)) continue;
         const text = normalizeText(btn.textContent);
-        if ((text === '继续学习' || text === '我知道了') && isVisible(btn)) {
-          const host =
-            btn.closest(
-              '.maskDiv, .popDiv, .dialog, .layui-layer, .ant-modal, [role="dialog"]'
-            ) || btn.parentElement;
-          if (host && isManualVerificationText(host.textContent || '')) continue;
-          safeClick(btn);
-          this.lastIdleDismissAt = Date.now();
-          this.setStatus('dialog', `已关闭提示：${text}`);
-          return true;
-        }
+        if (!(text === '继续学习' || text === '我知道了')) continue;
+        const host = btn.closest(
+          '.maskDiv, .popDiv, .dialog, .layui-layer, .ant-modal, [role="dialog"]'
+        );
+        if (!host || !isVisible(host)) continue;
+        if (isManualVerificationText(host.textContent || '')) continue;
+        safeClick(btn);
+        this.lastIdleDismissAt = Date.now();
+        this.setStatus('dialog', `已关闭提示：${text}`);
+        return true;
       }
       return false;
     }
@@ -1703,16 +1710,15 @@
           if (IS_TOP) {
             await this.performNextChapter(reason);
           } else {
-            try {
-              window.parent.postMessage({ type: 'XXT_GO_NEXT_CHAPTER', reason }, '*');
-            } catch (error) {
-              this.log('通知顶层切换失败:', error);
-            }
+            window.parent.postMessage({ type: 'XXT_GO_NEXT_CHAPTER', reason }, '*');
+            // iframe 本地锁短暂占据，防止同一帧重复上报
+            await new Promise(resolve => setTimeout(resolve, 1500));
           }
+        } catch (error) {
+          this.log('切换下一章失败:', error);
         } finally {
-          setTimeout(() => {
-            this.nextPending = false;
-          }, 1200);
+          // 顶层：锁持续到切章确认/超时全程结束，避免确认期间重复触发连跳两节
+          this.nextPending = false;
         }
       };
 
@@ -1882,10 +1888,30 @@
 
   const player = new XueXiTongAutoPlayer();
 
+  // 仅接受来自学习通域（含 iframe 子域）或同源页面的受控消息，忽略第三方页面伪造消息
+  const isTrustedMessage = event => {
+    if (!event.origin) return true; // 同源消息（event.origin 为空）
+    try {
+      const host = new URL(event.origin).hostname.toLowerCase();
+      return (
+        host === 'chaoxing.com' ||
+        host.endsWith('.chaoxing.com') ||
+        host === 'fx361.com' ||
+        host.endsWith('.fx361.com')
+      );
+    } catch (_) {
+      return false;
+    }
+  };
+
   window.addEventListener('message', async event => {
     if (!event.data || !IS_TOP || player.dead) return;
+    if (!isTrustedMessage(event)) return;
     if (event.data.type === 'XXT_GO_NEXT_CHAPTER' && player.settings.isRunning) {
       player.requestNextChapter(event.data.reason || 'iframe');
+    } else if (event.data.type === 'XXT_STATS_BUMP') {
+      // iframe 统计上报：由顶层统一累加写 storage（单写者模型）
+      await player.bumpStat(String(event.data.key || ''));
     } else if (event.data.type === 'XXT_STATS_UPDATED') {
       await player.loadStats();
       player.publishStatus(true);
