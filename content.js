@@ -16,6 +16,7 @@
       autoAnswer: true,
       mute: true,
       skipQuiz: true,
+      autoQuizSubmit: false,
       autoNext: true,
       dismissIdle: true,
       showHud: true,
@@ -45,6 +46,7 @@
   const countRemainingCatalog = DOM.countRemainingCatalog || (() => 0);
   const fingerprintText = DOM.fingerprintText || (t => normalizeText(t).slice(0, 160));
   const shouldStopByLimits = DOM.shouldStopByLimits || (() => ({ stop: false, reason: '' }));
+  const quizReadyToSubmit = DOM.quizReadyToSubmit || (() => ({ ready: false, objectiveCount: 0, answeredCount: 0 }));
   const trimSet = DOM.trimSet || ((setLike) => new Set(setLike || []));
   const isManualVerificationText =
     DOM.isManualVerificationText ||
@@ -84,6 +86,9 @@
       this.tickTimer = null;
       this.scanTimer = null;
       this.lastAnswerAt = 0;
+      this.lastQuizAt = 0;
+      this.lastSubmitAt = 0;
+      this.lastSubmitConfirmAt = 0;
       this.lastNextAt = 0;
       this.lastDocScrollAt = 0;
       this.lastIdleDismissAt = 0;
@@ -1313,6 +1318,7 @@
       if (video) this.guardVideo(video);
 
       if (this.settings.autoAnswer) this.checkAndAnswerQuestion();
+      if (this.settings.autoQuizSubmit) this.checkAndAnswerQuiz();
       this.handleDocumentReading();
       this.dismissJobFinishTip();
     }
@@ -1411,7 +1417,7 @@
     handleTopFrameTasks() {
       if (this.switchToVideoTab()) return;
 
-      if (this.settings.skipQuiz && this.isChapterTest()) {
+      if (this.settings.skipQuiz && this.isChapterTest() && !this.settings.autoQuizSubmit) {
         this.setStatus('skip', '跳过章节测验');
         this.requestNextChapter('chapter-test');
         return;
@@ -1698,6 +1704,151 @@
       }
     }
 
+    // ---------- 章节测验自动作答 ----------
+
+    findQuizSubmitButton() {
+      const selectors = [
+        '#submit',
+        '.js-submit',
+        '.btn.flex-btn.js-submit',
+        'input[type="submit"]'
+      ];
+      for (const selector of selectors) {
+        for (const el of document.querySelectorAll(selector)) {
+          if (isVisible(el)) return el;
+        }
+      }
+      // 文本兜底：仅认“交卷”，避免与弹窗题的“提交”混淆
+      for (const el of document.querySelectorAll('a, button, input[type="button"]')) {
+        if (!isVisible(el)) continue;
+        const text = normalizeText(el.textContent || el.value || '');
+        if (text === '交卷' || text.includes('交卷')) return el;
+      }
+      return null;
+    }
+
+    findQuizPage() {
+      if (Date.now() - this.lastQuizAt < 2500) return null;
+      const containers = document.querySelectorAll('.tkTopic, .TiMu, .tk_topic, .questionLi');
+      for (const el of containers) {
+        if (!isVisible(el)) continue;
+        // 视频弹窗题也复用 .tkTopic 类名，但位于弹出层内，需排除
+        if (el.closest('.maskDiv, .popDiv, .ans-videoquiz, .layui-layer')) continue;
+        if (!el.querySelector('input[type="radio"], input[type="checkbox"]')) continue;
+        // 仅当页面存在交卷按钮时才视为章节测验页
+        if (!this.findQuizSubmitButton()) continue;
+        return el;
+      }
+      return null;
+    }
+
+    // 收集测验页全部客观题（按选项 name 分组，兼容题目容器结构不一的页面）
+    collectQuizQuestions() {
+      const groups = new Map();
+      const inputs = [
+        ...document.querySelectorAll('input[type="radio"], input[type="checkbox"]')
+      ].filter(
+        el => isVisible(el) && !el.closest('.maskDiv, .popDiv, .ans-videoquiz, .layui-layer')
+      );
+      for (const input of inputs) {
+        const key = input.name || input; // 无 name 的选项各自成一组
+        let group = groups.get(key);
+        if (!group) {
+          group = { inputs: [] };
+          groups.set(key, group);
+        }
+        group.inputs.push(input);
+      }
+      return [...groups.values()].map(group => {
+        const radios = group.inputs.filter(el => el.type === 'radio');
+        const boxes = group.inputs.filter(el => el.type === 'checkbox');
+        return {
+          inputs: group.inputs,
+          hasOptions: true,
+          answered:
+            radios.length > 0 ? radios.some(r => r.checked) : boxes.some(c => c.checked)
+        };
+      });
+    }
+
+    checkAndAnswerQuiz() {
+      if (!this.settings.isRunning || !this.settings.autoQuizSubmit) return;
+      const page = this.findQuizPage();
+      if (!page) return;
+      this.lastQuizAt = Date.now();
+
+      const questions = this.collectQuizQuestions();
+      if (!questions.length) return;
+
+      let changed = false;
+      for (const q of questions) {
+        if (!q.hasOptions || q.answered) continue;
+        const radios = q.inputs.filter(el => el.type === 'radio');
+        const checkboxes = q.inputs.filter(el => el.type === 'checkbox');
+        if (radios.length > 0) {
+          safeClick(radios[Math.floor(Math.random() * radios.length)]);
+          changed = true;
+        } else if (checkboxes.length > 0) {
+          const count = Math.max(1, Math.ceil(checkboxes.length / 2));
+          [...checkboxes]
+            .sort(() => Math.random() - 0.5)
+            .slice(0, count)
+            .forEach(box => safeClick(box));
+          changed = true;
+        }
+      }
+
+      const state = quizReadyToSubmit(questions);
+      if (changed) {
+        this.setStatus('quiz', `正在作答测验（${state.answeredCount}/${state.objectiveCount}）`);
+        return;
+      }
+      if (state.ready) {
+        this.setStatus('quiz', '测验已完整作答');
+        this.submitQuiz();
+      }
+    }
+
+    submitQuiz() {
+      if (Date.now() - this.lastSubmitAt < 8000) return;
+      this.lastSubmitAt = Date.now();
+      const btn = this.findQuizSubmitButton();
+      if (!btn) return;
+      this.log('测验交卷');
+      safeClick(btn);
+      // 交卷确认弹窗（layui / 原生确认）
+      setTimeout(() => {
+        this.confirmQuizSubmitOnce();
+        if (!IS_TOP) {
+          window.parent.postMessage({ type: 'XXT_QUIZ_SUBMITTED' }, '*');
+        }
+      }, randomDelay(900, 1500));
+    }
+
+    confirmQuizSubmitOnce() {
+      if (Date.now() - this.lastSubmitConfirmAt < 8000) return;
+      this.lastSubmitConfirmAt = Date.now();
+      const roots = document.querySelectorAll(
+        '.layui-layer, .maskDiv, .popDiv, [role="dialog"], .ant-modal'
+      );
+      for (const root of roots) {
+        if (!isVisible(root)) continue;
+        const text = normalizeText(root.textContent || '');
+        if (!/交卷|确定要|提交试卷/.test(text)) continue;
+        const confirm = [...root.querySelectorAll('a, button, .layui-layer-btn0')].find(el => {
+          if (!isVisible(el)) return false;
+          const t = normalizeText(el.textContent || '');
+          return t === '确定' || t === '确认' || t === '是' || t === '交卷' || t === '提交';
+        });
+        if (confirm) {
+          safeClick(confirm);
+          this.log('测验交卷确认:', normalizeText(confirm.textContent || ''));
+          return true;
+        }
+      }
+      return false;
+    }
+
     requestNextChapter(reason, { force = false } = {}) {
       if (!force && !this.settings.autoNext) return false;
       if (this.nextPending || Date.now() - this.lastNextAt < 4000) return false;
@@ -1888,7 +2039,7 @@
 
   const player = new XueXiTongAutoPlayer();
 
-  // 仅接受来自学习通域（含 iframe 子域）或同源页面的受控消息，忽略第三方页面伪造消息
+  // 仅接受来自学习通域（含 iframe 子域）、教育网域或同源页面的受控消息，忽略第三方页面伪造消息
   const isTrustedMessage = event => {
     if (!event.origin) return true; // 同源消息（event.origin 为空）
     try {
@@ -1897,7 +2048,9 @@
         host === 'chaoxing.com' ||
         host.endsWith('.chaoxing.com') ||
         host === 'fx361.com' ||
-        host.endsWith('.fx361.com')
+        host.endsWith('.fx361.com') ||
+        host === 'edu.cn' ||
+        host.endsWith('.edu.cn')
       );
     } catch (_) {
       return false;
@@ -1923,6 +2076,10 @@
         event.data.reason || '已自动暂停',
         event.data.phase || 'limit'
       );
+    } else if (event.data.type === 'XXT_QUIZ_SUBMITTED') {
+      // iframe 测验交卷完成，稍候跳转结果页后自动切下一节
+      player.setStatus('quiz', '测验已交卷，准备下一节');
+      setTimeout(() => player.requestNextChapter('quiz-submitted'), randomDelay(3000, 4500));
     }
   });
 

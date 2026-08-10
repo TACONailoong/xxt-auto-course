@@ -179,6 +179,23 @@ test('summarizeOptions', () => {
   ]);
 });
 
+test('summarizeOptions 含测验作答', () => {
+  const chips = DOM.summarizeOptions({
+    autoAnswer: true,
+    autoQuizSubmit: true,
+    skipQuiz: true,
+    mute: false,
+    autoNext: false,
+    dismissIdle: false,
+    showHud: false,
+    stopWhenDone: false,
+    maxChapters: 0,
+    maxMinutes: 0
+  });
+  assert.ok(chips.includes('测验作答'), chips.join(','));
+  assert.ok(chips.includes('答题'), chips.join(','));
+});
+
 test('shouldStopByLimits 切章上限', () => {
   const result = DOM.shouldStopByLimits(
     { nextCount: 3, startedAt: Date.now() },
@@ -277,6 +294,43 @@ test('pickSettings 强制类型', () => {
   assert.strictEqual(picked.isRunning, false);
   assert.strictEqual(picked.playbackSpeed, 2.5);
   assert.strictEqual(picked.maxChapters, 3);
+});
+
+test('quizReadyToSubmit 全部客观题已作答', () => {
+  const state = DOM.quizReadyToSubmit([
+    { hasOptions: true, answered: true },
+    { hasOptions: true, answered: true }
+  ]);
+  assert.deepStrictEqual(state, { ready: true, objectiveCount: 2, answeredCount: 2 });
+});
+
+test('quizReadyToSubmit 存在未答客观题不可交卷', () => {
+  const state = DOM.quizReadyToSubmit([
+    { hasOptions: true, answered: true },
+    { hasOptions: true, answered: false }
+  ]);
+  assert.strictEqual(state.ready, false);
+  assert.strictEqual(state.objectiveCount, 2);
+  assert.strictEqual(state.answeredCount, 1);
+});
+
+test('quizReadyToSubmit 全主观题不可交卷', () => {
+  const state = DOM.quizReadyToSubmit([
+    { hasOptions: false, answered: true },
+    { hasOptions: false, answered: true }
+  ]);
+  assert.strictEqual(state.ready, false);
+  assert.strictEqual(state.objectiveCount, 0);
+});
+
+test('quizReadyToSubmit 客观题+主观题混合：主观题不算门槛', () => {
+  const state = DOM.quizReadyToSubmit([
+    { hasOptions: true, answered: true },
+    { hasOptions: false, answered: true }
+  ]);
+  assert.strictEqual(state.ready, true);
+  assert.strictEqual(state.objectiveCount, 1);
+  assert.strictEqual(state.answeredCount, 1);
 });
 
 console.log(failed === 0 ? '\n单元测试全部通过' : `\n单元测试失败: ${failed}`);

@@ -8,6 +8,7 @@ const DEFAULT_SETTINGS =
     autoAnswer: true,
     mute: true,
     skipQuiz: true,
+    autoQuizSubmit: false,
     autoNext: true,
     dismissIdle: true,
     showHud: true,
@@ -89,6 +90,7 @@ function bindEvents() {
   bindToggle('toggleAnswer', 'autoAnswer');
   bindToggle('toggleMute', 'mute');
   bindToggle('toggleSkipQuiz', 'skipQuiz');
+  bindToggle('toggleQuizSubmit', 'autoQuizSubmit');
   bindToggle('toggleAutoNext', 'autoNext');
   bindToggle('toggleDismissIdle', 'dismissIdle');
   bindToggle('toggleShowHud', 'showHud');
@@ -168,6 +170,16 @@ function bindEvents() {
       try {
         const text = await file.text();
         const raw = JSON.parse(text);
+        // 仅接受本插件导出的配置；无 app 字段的旧版/手写 JSON 仍兼容
+        if (
+          raw &&
+          typeof raw === 'object' &&
+          Object.prototype.hasOwnProperty.call(raw, 'app') &&
+          raw.app !== 'xuexitong-auto-player'
+        ) {
+          showSaveHint('导入失败：文件不是本插件配置');
+          return;
+        }
         settings = pickSettings(raw.settings || raw, DEFAULT_SETTINGS);
         updateUI();
         await chrome.storage.sync.set(settings);
@@ -425,6 +437,7 @@ function updateUI() {
   setToggle('toggleAnswer', settings.autoAnswer);
   setToggle('toggleMute', settings.mute);
   setToggle('toggleSkipQuiz', settings.skipQuiz);
+  setToggle('toggleQuizSubmit', settings.autoQuizSubmit);
   setToggle('toggleAutoNext', settings.autoNext);
   setToggle('toggleDismissIdle', settings.dismissIdle);
   setToggle('toggleShowHud', settings.showHud);

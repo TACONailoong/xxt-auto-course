@@ -166,6 +166,7 @@ function xxtSummarizeOptions(settings) {
   if (settings.autoAnswer) chips.push('答题');
   if (settings.mute) chips.push('静音');
   if (settings.skipQuiz) chips.push('跳过测验');
+  if (settings.autoQuizSubmit) chips.push('测验作答');
   if (settings.autoNext) chips.push('自动下一节');
   if (settings.dismissIdle) chips.push('防挂机');
   if (settings.showHud) chips.push('浮层');
@@ -256,6 +257,25 @@ function xxtPickSettings(raw, defaults) {
   return out;
 }
 
+// 测验交卷条件：测验页存在至少一道客观题，且全部客观题已作答；
+// 全主观题或存在未答客观题时不满足（避免交白卷 / 漏题）。
+// questions: [{ hasOptions: boolean, answered: boolean }]
+function xxtQuizReadyToSubmit(questions) {
+  const list = Array.isArray(questions) ? questions : [];
+  let objectiveCount = 0;
+  let answeredCount = 0;
+  for (const q of list) {
+    if (!q || !q.hasOptions) continue;
+    objectiveCount += 1;
+    if (q.answered) answeredCount += 1;
+  }
+  return {
+    ready: objectiveCount > 0 && answeredCount === objectiveCount,
+    objectiveCount,
+    answeredCount
+  };
+}
+
 const XXT_DOM = {
   isVisible: xxtIsVisible,
   safeClick: xxtSafeClick,
@@ -275,6 +295,7 @@ const XXT_DOM = {
   countRemainingCatalog: xxtCountRemainingCatalog,
   fingerprintText: xxtFingerprintText,
   pickSettings: xxtPickSettings,
+  quizReadyToSubmit: xxtQuizReadyToSubmit,
   shouldStopByLimits: xxtShouldStopByLimits,
   trimSet: xxtTrimSet,
   isManualVerificationText: xxtIsManualVerificationText,
@@ -304,6 +325,7 @@ if (typeof globalThis !== 'undefined') {
     xxtCountRemainingCatalog,
     xxtFingerprintText,
     xxtPickSettings,
+    xxtQuizReadyToSubmit,
     xxtShouldStopByLimits,
     xxtTrimSet,
     xxtIsManualVerificationText,

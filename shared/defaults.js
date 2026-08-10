@@ -7,6 +7,7 @@ const XXT_DEFAULT_SETTINGS = {
   autoAnswer: true,
   mute: true,
   skipQuiz: true,
+  autoQuizSubmit: false,
   autoNext: true,
   dismissIdle: true,
   showHud: true,
